@@ -1,0 +1,369 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		D8AFF257B45D0C513672EC45 = {
+			isa = "PBXFileSystemSynchronizedRootGroup";
+			path = "Sources/Forky";
+			sourceTree = "<group>";
+		};
+		559E8B37344055199DB8BDF7 = {
+			isa = "PBXFileSystemSynchronizedRootGroup";
+			path = "Tests/ForkyCoreTests";
+			sourceTree = "<group>";
+		};
+		D9FBA6D7F91C219AD018A0C9 = {
+			isa = "PBXFileSystemSynchronizedRootGroup";
+			path = "Tests/ForkyUITests";
+			sourceTree = "<group>";
+		};
+		BC4A71180870F7945155FBB0 = {
+			isa = "XCLocalSwiftPackageReference";
+			relativePath = ".";
+		};
+		763D774377779C412BB71F6F = {
+			isa = "PBXFileReference";
+			explicitFileType = "wrapper.application";
+			includeInIndex = 0;
+			path = "Forky.app";
+			sourceTree = "BUILT_PRODUCTS_DIR";
+		};
+		D1602D4D512F4F7DE2333D3A = {
+			isa = "PBXFileReference";
+			explicitFileType = "wrapper.cfbundle";
+			includeInIndex = 0;
+			path = "ForkyCoreTests.xctest";
+			sourceTree = "BUILT_PRODUCTS_DIR";
+		};
+		9E0A939EBFAE9AE855E35CCB = {
+			isa = "PBXFileReference";
+			explicitFileType = "wrapper.cfbundle";
+			includeInIndex = 0;
+			path = "ForkyUITests.xctest";
+			sourceTree = "BUILT_PRODUCTS_DIR";
+		};
+		711A6108BA2CE6CA93DD47D6 = {
+			isa = "PBXFileReference";
+			lastKnownFileType = "text";
+			path = "README.md";
+			sourceTree = "<group>";
+		};
+		E126FADDD7E769A9E63843EC = {
+			isa = "PBXFileReference";
+			lastKnownFileType = "text";
+			path = "Package.swift";
+			sourceTree = "<group>";
+		};
+		0A3E27B8CA818264D75C8D81 = {
+			isa = "PBXGroup";
+			children = (763D774377779C412BB71F6F, D1602D4D512F4F7DE2333D3A, 9E0A939EBFAE9AE855E35CCB);
+			name = "Products";
+			sourceTree = "<group>";
+		};
+		0035FE99EA2940F7FA633A58 = {
+			isa = "PBXGroup";
+			children = (D8AFF257B45D0C513672EC45, 559E8B37344055199DB8BDF7, D9FBA6D7F91C219AD018A0C9, E126FADDD7E769A9E63843EC, 711A6108BA2CE6CA93DD47D6, 0A3E27B8CA818264D75C8D81);
+			sourceTree = "<group>";
+		};
+		1241936D4DD3AAD68FE7BFBD = {
+			isa = "PBXContainerItemProxy";
+			containerPortal = 244210E48437B6556980A702;
+			proxyType = 1;
+			remoteGlobalIDString = A172CEDCAE47474B615C54D5;
+			remoteInfo = "Forky";
+		};
+		A7B1C627A1D790268DC878E8 = {
+			isa = "PBXTargetDependency";
+			target = A172CEDCAE47474B615C54D5;
+			targetProxy = 1241936D4DD3AAD68FE7BFBD;
+		};
+		73EBF6644258C120893E685D = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = "14.0";
+				SDKROOT = "macosx";
+				SWIFT_VERSION = "6.0";
+				SWIFT_STRICT_CONCURRENCY = "complete";
+				CLANG_ENABLE_MODULES = "YES";
+				CLANG_ENABLE_OBJC_ARC = "YES";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				DEBUG_INFORMATION_FORMAT = "dwarf";
+				ENABLE_TESTABILITY = "YES";
+				ONLY_ACTIVE_ARCH = "YES";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+			};
+			name = "Debug";
+		};
+		0B0C687DF8B6B8DC790B519C = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = "14.0";
+				SDKROOT = "macosx";
+				SWIFT_VERSION = "6.0";
+				SWIFT_STRICT_CONCURRENCY = "complete";
+				CLANG_ENABLE_MODULES = "YES";
+				CLANG_ENABLE_OBJC_ARC = "YES";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+			};
+			name = "Release";
+		};
+		D69E6ABAEE8D1F0F03292F91 = {
+			isa = "XCConfigurationList";
+			buildConfigurations = (73EBF6644258C120893E685D, 0B0C687DF8B6B8DC790B519C);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = "Release";
+		};
+		97CDF3DF6087AB0B63707401 = {
+			isa = "XCSwiftPackageProductDependency";
+			package = BC4A71180870F7945155FBB0;
+			productName = "ForkyCore";
+		};
+		4AE835B482CF32E74EC43844 = {
+			isa = "PBXBuildFile";
+			productRef = 97CDF3DF6087AB0B63707401;
+		};
+		7F4B88C9E71472B3D3C41817 = {
+			isa = "PBXSourcesBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		91024282FFD499F5807DB5BC = {
+			isa = "PBXFrameworksBuildPhase";
+			buildActionMask = 2147483647;
+			files = (4AE835B482CF32E74EC43844);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC549ACCB7C726C62ECFD4E2 = {
+			isa = "PBXResourcesBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B00CCDD09424E369308D67FA = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.forky.Forky";
+				GENERATE_INFOPLIST_FILE = "YES";
+				CODE_SIGN_STYLE = "Automatic";
+				SWIFT_VERSION = "6.0";
+				ENABLE_APP_SANDBOX = "NO";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_CFBundleDisplayName = "Forky";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Forky contributors";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon";
+				ENABLE_HARDENED_RUNTIME = "YES";
+				MARKETING_VERSION = "0.1.0";
+				CURRENT_PROJECT_VERSION = "1";
+			};
+			name = "Debug";
+		};
+		1B104479E55E37CF8A63CBDF = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.forky.Forky";
+				GENERATE_INFOPLIST_FILE = "YES";
+				CODE_SIGN_STYLE = "Automatic";
+				SWIFT_VERSION = "6.0";
+				ENABLE_APP_SANDBOX = "NO";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_CFBundleDisplayName = "Forky";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Forky contributors";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon";
+				ENABLE_HARDENED_RUNTIME = "YES";
+				MARKETING_VERSION = "0.1.0";
+				CURRENT_PROJECT_VERSION = "1";
+			};
+			name = "Release";
+		};
+		429643FC2242030B49D9DF4F = {
+			isa = "XCConfigurationList";
+			buildConfigurations = (B00CCDD09424E369308D67FA, 1B104479E55E37CF8A63CBDF);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = "Release";
+		};
+		A172CEDCAE47474B615C54D5 = {
+			isa = "PBXNativeTarget";
+			buildConfigurationList = 429643FC2242030B49D9DF4F;
+			buildPhases = (7F4B88C9E71472B3D3C41817, 91024282FFD499F5807DB5BC, DC549ACCB7C726C62ECFD4E2);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (D8AFF257B45D0C513672EC45);
+			name = "Forky";
+			packageProductDependencies = (97CDF3DF6087AB0B63707401);
+			productName = "Forky";
+			productReference = 763D774377779C412BB71F6F;
+			productType = "com.apple.product-type.application";
+		};
+		BA23984A0F95DC37B06ED072 = {
+			isa = "XCSwiftPackageProductDependency";
+			package = BC4A71180870F7945155FBB0;
+			productName = "ForkyCore";
+		};
+		0B4D3C835B57C313450FFE97 = {
+			isa = "PBXBuildFile";
+			productRef = BA23984A0F95DC37B06ED072;
+		};
+		5530A33C1B80192A53CEE423 = {
+			isa = "PBXSourcesBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E8B4C0CB76F029D913811C8 = {
+			isa = "PBXFrameworksBuildPhase";
+			buildActionMask = 2147483647;
+			files = (0B4D3C835B57C313450FFE97);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8FFEDA0D8FE1AD0E0B10C202 = {
+			isa = "PBXResourcesBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A56404F664D9C74A1768437C = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.forky.ForkyCoreTests";
+				GENERATE_INFOPLIST_FILE = "YES";
+				CODE_SIGN_STYLE = "Automatic";
+				SWIFT_VERSION = "6.0";
+				ENABLE_APP_SANDBOX = "NO";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+			};
+			name = "Debug";
+		};
+		D92822CC4FD45F6B2168EAEA = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.forky.ForkyCoreTests";
+				GENERATE_INFOPLIST_FILE = "YES";
+				CODE_SIGN_STYLE = "Automatic";
+				SWIFT_VERSION = "6.0";
+				ENABLE_APP_SANDBOX = "NO";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+			};
+			name = "Release";
+		};
+		30FFF3EA5B99AE2472D38E3B = {
+			isa = "XCConfigurationList";
+			buildConfigurations = (A56404F664D9C74A1768437C, D92822CC4FD45F6B2168EAEA);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = "Release";
+		};
+		CD133579BA2FB1354850D8F3 = {
+			isa = "PBXNativeTarget";
+			buildConfigurationList = 30FFF3EA5B99AE2472D38E3B;
+			buildPhases = (5530A33C1B80192A53CEE423, 8E8B4C0CB76F029D913811C8, 8FFEDA0D8FE1AD0E0B10C202);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (559E8B37344055199DB8BDF7);
+			name = "ForkyCoreTests";
+			packageProductDependencies = (BA23984A0F95DC37B06ED072);
+			productName = "ForkyCoreTests";
+			productReference = D1602D4D512F4F7DE2333D3A;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		7CA7A6716D3BC86DBBA7050D = {
+			isa = "PBXSourcesBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		36A1FECEF8786AC8C7DFB6EE = {
+			isa = "PBXFrameworksBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6254B8457C466B305D4AE2D7 = {
+			isa = "PBXResourcesBuildPhase";
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		460296A21C037B7D37435234 = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.forky.ForkyUITests";
+				GENERATE_INFOPLIST_FILE = "YES";
+				CODE_SIGN_STYLE = "Automatic";
+				SWIFT_VERSION = "6.0";
+				ENABLE_APP_SANDBOX = "NO";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				TEST_TARGET_NAME = "Forky";
+			};
+			name = "Debug";
+		};
+		F7171C450F96E215D3E9A930 = {
+			isa = "XCBuildConfiguration";
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.forky.ForkyUITests";
+				GENERATE_INFOPLIST_FILE = "YES";
+				CODE_SIGN_STYLE = "Automatic";
+				SWIFT_VERSION = "6.0";
+				ENABLE_APP_SANDBOX = "NO";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				TEST_TARGET_NAME = "Forky";
+			};
+			name = "Release";
+		};
+		BD8F6218A9D860C09ACC6B15 = {
+			isa = "XCConfigurationList";
+			buildConfigurations = (460296A21C037B7D37435234, F7171C450F96E215D3E9A930);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = "Release";
+		};
+		E8B06C4B5AA5B6A88A6DBD15 = {
+			isa = "PBXNativeTarget";
+			buildConfigurationList = BD8F6218A9D860C09ACC6B15;
+			buildPhases = (7CA7A6716D3BC86DBBA7050D, 36A1FECEF8786AC8C7DFB6EE, 6254B8457C466B305D4AE2D7);
+			buildRules = ();
+			dependencies = (A7B1C627A1D790268DC878E8);
+			fileSystemSynchronizedGroups = (D9FBA6D7F91C219AD018A0C9);
+			name = "ForkyUITests";
+			packageProductDependencies = ();
+			productName = "ForkyUITests";
+			productReference = 9E0A939EBFAE9AE855E35CCB;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		244210E48437B6556980A702 = {
+			isa = "PBXProject";
+			attributes = {
+				BuildIndependentTargetsInParallel = "YES";
+				LastUpgradeCheck = "2700";
+				TargetAttributes = {
+					E8B06C4B5AA5B6A88A6DBD15 = {
+						CreatedOnToolsVersion = "27.0";
+						TestTargetID = A172CEDCAE47474B615C54D5;
+					};
+				};
+			};
+			buildConfigurationList = D69E6ABAEE8D1F0F03292F91;
+			developmentRegion = "en";
+			knownRegions = ("en", "Base");
+			mainGroup = 0035FE99EA2940F7FA633A58;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (BC4A71180870F7945155FBB0);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0A3E27B8CA818264D75C8D81;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A172CEDCAE47474B615C54D5, CD133579BA2FB1354850D8F3, E8B06C4B5AA5B6A88A6DBD15);
+		};
+	};
+	rootObject = 244210E48437B6556980A702;
+}
