@@ -77,6 +77,7 @@ final class RepositoryStore {
     @ObservationIgnored private var bootstrapped = false
     @ObservationIgnored private var historyCursor: HistoryCursor?
     @ObservationIgnored private var drafts: [String: String] = [:]
+    var editDrafts: [String: String] = [:]
     @ObservationIgnored private let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
 
     init() {
@@ -340,9 +341,17 @@ final class RepositoryStore {
         }
     }
 
-    func stage(_ change: FileChange) { mutate("Staging change…") { try await $0.stage(change) } }
+    func stage(_ change: FileChange) {
+        if change.isConflict { requestAdvanced(.conflict(change)); return }
+        mutate("Staging change…") { try await $0.stage(change) }
+    }
     func unstage(_ change: FileChange) { mutate("Unstaging change…") { try await $0.unstage(change) } }
-    func stage(_ changes: [FileChange]) { mutate("Staging selected files…") { try await $0.stage(changes) } }
+    func stage(_ changes: [FileChange]) {
+        guard !changes.contains(where: \.isConflict) else {
+            show(GitError.invalidInput("Resolve conflicts individually before batch staging."), title: "Conflicts require review"); return
+        }
+        mutate("Staging selected files…") { try await $0.stage(changes) }
+    }
     func unstage(_ changes: [FileChange]) { mutate("Unstaging selected files…") { try await $0.unstage(changes) } }
 
     func canCheckout(_ reference: GitReference) -> Bool {
@@ -386,7 +395,7 @@ final class RepositoryStore {
         }
     }
 
-    private func mutate(_ label: String, clearMessage: Bool = false,
+    func mutate(_ label: String, clearMessage: Bool = false,
                         operation: @escaping @Sendable (GitRepository) async throws -> Void) {
         guard canWrite, let repository else { return }
         runOperation(label, clearMessage: clearMessage) { try await operation(repository) }
@@ -554,7 +563,7 @@ final class RepositoryStore {
         refreshID = UUID(); detailID = UUID(); historyID = UUID()
     }
 
-    private func show(_ error: any Error, title: String) {
+    func show(_ error: any Error, title: String) {
         notice = AppNotice(title: title, message: error.localizedDescription)
     }
 

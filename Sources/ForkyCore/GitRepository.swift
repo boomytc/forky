@@ -181,14 +181,17 @@ public struct GitRepository: Sendable {
         }
     }
 
-    func command(_ arguments: [String], accepted: Set<Int32> = [0], write: Bool = false, network: Bool = false, literalPaths: Bool = false) async throws -> GitProcessResult {
+    func command(_ arguments: [String], accepted: Set<Int32> = [0], write: Bool = false, network: Bool = false, literalPaths: Bool = false, timeout: TimeInterval? = nil, sequenceEditor: URL? = nil) async throws -> GitProcessResult {
         var args = ["--no-pager", "-c", "color.ui=false", "-c", "core.quotepath=false",
                     "-c", "core.fsmonitor=false", "-C", root.path]
         // Only caller-owned file arguments are literal. Exporting this mode globally
         // breaks stash's internal :/ (top) cleanup pathspec and can leave saved files behind.
         if literalPaths { args.insert("--literal-pathspecs", at: 0) }
         if !write { args.insert("--no-optional-locks", at: 0) }
-        let output = try await (network ? runner.withTimeout(300) : runner).run(args + arguments)
+        let execution = timeout.map { runner.withTimeout($0) } ?? (network ? runner.withTimeout(300) : runner)
+        let output: GitProcessResult
+        if let sequenceEditor { output = try await execution.runWithSequenceEditor(args + arguments, source: sequenceEditor) }
+        else { output = try await execution.run(args + arguments) }
         guard accepted.contains(output.status) else {
             throw GitError.commandFailed(output.status, String(decoding: output.stderr, as: UTF8.self))
         }
@@ -227,14 +230,13 @@ public struct GitRepository: Sendable {
         var gitPath = try GitParsers.string(gitDirResult.stdout)
         if gitPath.hasSuffix("\n") { gitPath.removeLast() }
         let gitDirectory = URL(fileURLWithPath: gitPath, isDirectory: true)
-        let inProgress = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"]
-            .contains { FileManager.default.fileExists(atPath: gitDirectory.appendingPathComponent($0).path) }
+        let operation = try readOperation(gitDirectory: gitDirectory, head: head)
         let collaboration: Observed<CollaborationSnapshot>
         do { collaboration = .available(try await readCollaboration(head: head, branch: branch, references: references)) }
         catch is CancellationError { throw CancellationError() }
         catch { collaboration = .unavailable(error.localizedDescription) }
         return RepositorySnapshot(root: root, head: head, branch: branch, changes: changes,
                                   references: references, indexFingerprint: fingerprint,
-                                  operationInProgress: inProgress, collaboration: collaboration)
+                                  operation: operation, collaboration: collaboration)
     }
 }

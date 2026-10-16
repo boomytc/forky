@@ -35,7 +35,7 @@ public enum GitError: Error, LocalizedError, Sendable {
         case .unsupportedPath: "This path cannot be represented safely. Non-UTF-8 paths are not supported in this version."
         case .nothingStaged: "Stage at least one change before committing."
         case .conflicts: "Resolve and stage all conflicts before continuing."
-        case .operationInProgress: "A merge, rebase, cherry-pick or revert is in progress. Complete it in another Git client first."
+        case .operationInProgress: "A merge, rebase, cherry-pick or revert is in progress. Review and complete that operation before starting another."
         case .staleIndex: "The staged changes or HEAD changed since the last refresh. Review the updated changes before committing."
         case .invalidMessage: "Enter a nonempty commit message of at most 64 KiB, without NUL characters."
         case .dirtyWorktree: "Commit or stash all staged, unstaged and untracked changes before this operation. Forky will not discard or stash them automatically."

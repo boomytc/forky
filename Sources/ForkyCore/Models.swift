@@ -85,7 +85,8 @@ public struct RepositorySnapshot: Sendable {
     public let changes: [FileChange]
     public let references: [GitReference]
     public let indexFingerprint: String
-    public let operationInProgress: Bool
+    public let operation: RepositoryOperation
+    public var operationInProgress: Bool { operation.isActive }
     public let collaboration: Observed<CollaborationSnapshot>
     public var branches: [GitReference] { references.filter { $0.kind != .tag } }
     public var tags: [GitReference] { references.filter { $0.kind == .tag } }

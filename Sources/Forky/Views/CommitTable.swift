@@ -7,6 +7,8 @@ struct CommitTable: NSViewRepresentable {
     let graph: CommitGraph
     let decorations: [String: [GitReference]]
     @Binding var selection: String?
+    let canExecute: (HistoryCommand, GitCommit) -> Bool
+    let execute: (HistoryCommand, GitCommit) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -32,6 +34,7 @@ struct CommitTable: NSViewRepresentable {
             table.addTableColumn(column)
         }
         let menu = NSMenu()
+        menu.autoenablesItems = false
         menu.delegate = context.coordinator
         table.menu = menu
         context.coordinator.table = table
@@ -126,17 +129,17 @@ struct CommitTable: NSViewRepresentable {
             menu.removeAllItems()
             guard let table, parent.commits.indices.contains(table.clickedRow) else { return }
             let commit = parent.commits[table.clickedRow]
-            for (title, value) in [("Copy Commit SHA", commit.oid), ("Copy Commit Message", commit.subject + "\n\n" + commit.body)] {
-                let item = NSMenuItem(title: title, action: #selector(copyValue(_:)), keyEquivalent: "")
-                item.target = self; item.representedObject = value
+            for command in HistoryCommand.allCases {
+                let item = NSMenuItem(title: command.rawValue, action: #selector(performCommand(_:)), keyEquivalent: "")
+                item.target = self; item.representedObject = HistoryMenuAction(command: command, commit: commit)
+                item.isEnabled = parent.canExecute(command, commit)
                 menu.addItem(item)
             }
         }
 
-        @objc private func copyValue(_ item: NSMenuItem) {
-            guard let value = item.representedObject as? String else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
+        @objc private func performCommand(_ item: NSMenuItem) {
+            guard let value = item.representedObject as? HistoryMenuAction else { return }
+            parent.execute(value.command, value.commit)
         }
     }
 }

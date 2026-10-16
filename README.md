@@ -60,12 +60,25 @@ The app invokes `/usr/bin/git`; Xcode / Command Line Tools must already be avail
   **tracking branch** after confirmation; symbolic aliases are not checkout targets.
 - ⌘O open, ⌘R refresh, ⌘1 changes, ⌘2 history, ⌘3 stashes, ⇧⌘N new branch,
   ⇧⌘S stash, ⌘↩ commit.
+- Line / hunk stage and unstage for regular tracked text modifications; index-only,
+  exact-preview freshness checks, worktree bytes unchanged.
+- Three-way conflict editor: Base / Ours / Theirs, editable result, save-only or explicit
+  stage resolution, including modify/delete. Remaining marker lines require approval.
+- Confirmed non-merge cherry-pick / revert, plus operation Continue / Skip / Abort.
+- Interactive linear rebase: reorder, pick, edit/reword, squash, fixup, drop and optional
+  captured onto reference. Edit pauses for an explicit amend before Continue.
+- Browse the selected commit's complete file tree; blob preview and per-line blame,
+  preserving the commit anchor even when worktree/HEAD changes.
+- Same named history commands in the clicked-row context menu and detail menu.
 - Native appearance, resizable panes and original Forky artwork.
 
-Not yet implemented: hunk/line staging, branch/tag deletion, stash pop, interactive
-merge/rebase/cherry-pick/revert, conflict editor/continue/abort controls, blame/file tree,
-automatic filesystem watching, credential/account management, AI, configurable Git
-executable or notarization. Diverged pulls intentionally stop rather than guessing a policy.
+See [advanced workflows](docs/ADVANCED_WORKFLOWS.md) for usage and deliberate limits.
+
+Not yet implemented: partial staging of new/deleted/renamed/binary/mode-change files,
+merge-preserving rebase or arbitrary exec todo, merge-commit mainline selection, a new
+merge-start UI, branch/tag deletion, stash pop, automatic filesystem watching,
+credential/account management, AI, configurable Git executable or notarization.
+Diverged pulls still stop rather than guessing a merge/rebase policy.
 
 See [the alignment notes](docs/ALIGNMENT.md) for reference sources and remaining gaps.
 
@@ -87,15 +100,16 @@ This catches many external index changes, but is **not an atomic lock against ot
 clients**. Do not concurrently write the same repository from another client.
 
 Process output is limited to 4 MiB per stream. Local commands have a 30-second deadline;
-transport commands use 300 seconds, creation/clone uses 900 seconds. The diff
+transport/history-edit commands use 300 seconds, creation/clone uses 900 seconds. The diff
 renderer separately previews at most 500,000 characters and marks truncation.
 Timeout/cancellation controls the directly owned Git process, not arbitrary descendants
 started by hooks or filters. A helper that keeps output open produces an explicit
 incomplete-output error. A failed or interrupted write may have already changed state;
 inspect/refresh before retrying. Non-UTF-8 paths are rejected rather than rewritten.
 
-There are no automatic remote operations, force operations, discard/reset/clean actions,
-or hidden stage-all/checkout. Checkout refuses dirty worktrees, refuses overwriting ignored
+There are no automatic remote operations, force pushes, standalone discard/reset/clean
+actions, or hidden stage-all/checkout. Explicit Skip/Abort are destructive native Git
+steps; review their full changed scope. Abort is not a general undo. Checkout refuses dirty worktrees, refuses overwriting ignored
 files, does not recurse into submodules, and respects other worktrees' branch ownership.
 
 Network access happens only after your explicit confirmation. Git URL rewrite rules,
@@ -105,6 +119,8 @@ are disabled; configure an existing helper/agent if authentication fails. Known 
 userinfo is hidden in remote presentation/errors; new URLs with embedded credentials are
 rejected. Helper/hook output can contain its own data; review diagnostics before sharing.
 New local source paths must be absolute; there is no shell tilde expansion.
+History replay checks ignored obstructions across the onto transition and pending commit
+paths before starting; a clean porcelain status alone does not protect ignored local data.
 
 Fetch deliberately omits pruning, automatic tags and recursive submodules. Mirror and
 custom fetch mappings outside a remote's tracking namespace fail closed. Push never

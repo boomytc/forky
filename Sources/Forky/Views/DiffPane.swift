@@ -15,6 +15,16 @@ struct DiffPane: View {
                     .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     .help(store.diffTitle ?? "")
                 Spacer(minLength: 4)
+                if store.section == .changes, let selected = store.selectedChange,
+                   let file = store.snapshot?.changes.first(where: { $0.id == selected.path }) {
+                    if file.isConflict {
+                        Button("Resolve…") { store.requestAdvanced(.conflict(file)) }
+                            .disabled(!store.canWrite).accessibilityIdentifier("resolveConflict")
+                    } else if !file.isUntracked {
+                        Button(selected.side == .worktree ? "Stage Lines…" : "Unstage Lines…") { store.requestAdvanced(.partial(file, selected.side)) }
+                            .disabled(!store.canWrite).accessibilityIdentifier("partialStage")
+                    }
+                }
                 if store.diff.additions > 0 { Text("+\(store.diff.additions)").foregroundStyle(.green).monospacedDigit() }
                 if store.diff.deletions > 0 { Text("−\(store.diff.deletions)").foregroundStyle(.red).monospacedDigit() }
                 Picker("Diff Layout", selection: $store.diffMode) {

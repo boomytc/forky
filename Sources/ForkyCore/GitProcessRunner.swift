@@ -38,6 +38,15 @@ public struct GitProcessRunner: Sendable {
                                            timeout: timeout, outputLimit: outputLimit)
         return try await invocation.result()
     }
+
+    /// A typed, invocation-local editor input. Ambient GIT_* isolation remains unchanged.
+    func runWithSequenceEditor(_ arguments: [String], source: URL) async throws -> GitProcessResult {
+        try Task.checkCancellation()
+        let invocation = ProcessInvocation(executable: executable, arguments: arguments,
+            directory: nil, environment: environment.merging(["FORKY_REBASE_TODO": source.path]) { _, rhs in rhs },
+            timeout: timeout, outputLimit: outputLimit)
+        return try await invocation.result()
+    }
 }
 
 /// Mutable process state and both nonblocking readers have exactly one queue owner.

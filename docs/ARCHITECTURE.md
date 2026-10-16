@@ -81,7 +81,7 @@ verify this boundary. Forky does not issue an extra downstream clean to repair i
 
 The process runner owns one direct child, both nonblocking streams, output limits,
 deadline and post-exit drain. It holds the repository gate through cleanup. Local,
-transport and creation deadlines are 30/300/900 seconds; retained output is at most
+transport/history-edit and creation deadlines are 30/300/900 seconds; retained output is at most
 4 MiB per stream. Timeout copies retain the caller's executable and isolated environment.
 Ambient GIT_* redirection is discarded, not persisted.
 
@@ -94,9 +94,65 @@ are disabled. No credential/account store is added.
 Arbitrary descendants, malicious configuration, crash recovery and distribution
 are not containment guarantees. Failed/cancelled writes may have completed partially.
 
+## Exact index editing
+
+PartialPatch owns the complete original Git patch and LF/ASCII-byte-framed selectable
+facts. It never consumes the truncated DiffDocument presentation. Both directions are
+forward patches FROM the index (Git -R produces unstage input). Unselected deletion
+becomes context; unselected addition is omitted; coordinates/counts and no-newline
+markers are preserved. HEAD/index and exact source patch are rechecked before Git
+checks/applies the index-only result. Scope is regular tracked text modifications,
+with a 20,000-patch-line selection budget.
+
+ConflictReview owns stage identities and working bytes. Save rechecks both, rejects
+unsafe types/symlink traversal and writes one regular path before optional staging.
+SafeWorktree pins parent descriptors, uses a unique sibling replacement and copies
+ACL/xattrs plus permissions. Failed staging does not undo successful file replacement.
+Failed save/reword inputs remain in the bounded 16 MiB session draft cache.
+
+TemporaryInput owns its private directory through child completion and cleanup,
+including cancellation. Cleanup failure reports the retained location and original
+failure; it is not silently successful.
+
+## History editing and operation interpretation
+
+OperationState reads bounded controls once, validates required facts and fingerprints
+length-framed source bytes. It owns kind, restore identity, original branch, edit-stop
+facts and supported pending revisions. Unknown/corrupt state is active/unknown, never
+idle. Snapshot's boolean is derived, not an independent filesystem interpretation.
+
+OperationReview captures token, HEAD/index and changed worktree bytes. Continue/
+Skip/Abort recheck them. Continue refuses conflicts/unstaged tracked changes; Skip/
+Abort require explicit destructive approval. Abort is not a general rollback.
+
+RebasePlan owns a complete linear range and captured base/HEAD. Typed commands retain
+each commit once, including drop. Onto refs are rechecked by captured identity.
+A fixed native sequence-editor callback copies a private todo input through a quoted
+invocation-local environment operand. User code is not interpolated. Native todo
+survives input cleanup and pauses. Autostash/autosquash/update-refs and submodule
+recursion are disabled. Edit/reword is explicit paused amendment, then Continue.
+Unsupported external todo commands do not execute silently.
+
+HistorySafety checks complete possible write paths against ignored obstructions
+before native replay/reset, covering onto, replay, pending todo and restore transitions.
+Porcelain clean alone does not protect ignored local data. Conservative case-folded/
+prefix lookup keys retain source paths. Inventory errors never mean no collision.
+
+## Browsing and UI ownership
+
+RepositoryBrowser lazily reads captured commit/tree/blob identities, without checkout,
+filters or LFS hydration. Blame's LF-byte metadata/content parsing preserves CRLF and
+combining Unicode. Historical filename presentation is retained, never a lookup path.
+
+HistoryCommand is the single named action catalog for native context/detail menus.
+Context payload captures the clicked commit, not current selection or catalog position.
+Store checks session/root and write eligibility before routing immutable AdvancedRequest.
+Views never invoke Git directly.
+
 ## Remaining product work
 
-Hunk/line staging, merge conflict editing/continue/abort, merge/rebase/cherry-pick/revert,
-file tree/blame, tag/branch lifecycle, filesystem watching, account UX and broad platform/
-performance verification remain. Split diff pairs lines for display, not patch editing.
-See ALIGNMENT.md for scope and VALIDATION.md for executed evidence.
+Partial added/deleted/renamed/binary/mode-change files, complex conflicts, new merge-start
+UI/mainline selection, merge-preserving rebase, tag/branch lifecycle, filesystem watching,
+accounts and broad platform/performance verification remain. Split diff is a display
+representation, separate from exact selectable patches.
+See ADVANCED_WORKFLOWS.md, ALIGNMENT.md and VALIDATION.md.

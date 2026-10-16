@@ -27,7 +27,12 @@ struct HistoryView: View {
             } else {
                 VSplitView {
                     CommitTable(commits: store.commits, graph: store.graph, decorations: store.decorations,
-                                selection: Binding(get: { store.selectedCommitID }, set: store.selectCommit))
+                                selection: Binding(get: { store.selectedCommitID }, set: store.selectCommit),
+                                canExecute: { store.canExecuteHistory($0, commit: $1) },
+                                execute: { [root = store.repository?.root] command, commit in
+                                    guard root == store.repository?.root else { return }
+                                    store.executeHistory(command, commit: commit)
+                                })
                         .frame(minHeight: 145, idealHeight: 310)
                     VStack(spacing: 0) {
                         HStack {
@@ -40,11 +45,9 @@ struct HistoryView: View {
                                 Text(commit.shortOID).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                                 Text("\(store.commitFiles.count) \(store.commitFiles.count == 1 ? "file" : "files")").font(.system(size: 11)).foregroundStyle(.secondary)
                                 Menu {
-                                    Button("Create Branch Here…") { store.requestBranch(startingAt: commit.oid) }
-                                        .disabled(!store.canWrite)
-                                    Button("Copy Commit SHA") {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(commit.oid, forType: .string)
+                                    ForEach(HistoryCommand.allCases, id: \.self) { command in
+                                        Button(command.rawValue) { store.executeHistory(command, commit: commit) }
+                                            .disabled(!store.canExecuteHistory(command, commit: commit))
                                     }
                                 } label: { Image(systemName: "ellipsis.circle") }
                                 .menuStyle(.borderlessButton).fixedSize().accessibilityIdentifier("commitActions")

@@ -406,6 +406,166 @@ final class ForkyUITests: XCTestCase {
         XCTAssertEqual(try git(["branch", "--show-current"]).trimmingCharacters(in: .newlines), "feature/server")
     }
 
+    func testStageLineAndUnstageHunkWithoutChangingWorkingBytes() throws {
+        try prepare()
+        let partial = app.buttons["partialStage"]
+        XCTAssertTrue(partial.waitForExistence(timeout: 15))
+        partial.click()
+        let line = app.checkBoxes.matching(NSPredicate(format: "identifier BEGINSWITH %@", "patchLine:")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 10), app.debugDescription)
+        line.click()
+        app.windows.buttons["partialConfirm"].click()
+        XCTAssertTrue(app.buttons["unstage:README.md"].waitForExistence(timeout: 10))
+        XCTAssertTrue(try git(["show", ":README.md"]).contains("A visible change"))
+        let working = try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8)
+        app.buttons["partialStage"].click()
+        XCTAssertTrue(app.buttons["patchHunk:0"].waitForExistence(timeout: 10))
+        app.buttons["patchHunk:0"].click()
+        capture("Forky — line and hunk selection")
+        app.windows.buttons["partialConfirm"].click()
+        XCTAssertTrue(app.buttons["stage:README.md"].waitForExistence(timeout: 10))
+        XCTAssertTrue(try git(["diff", "--cached"]).isEmpty)
+        XCTAssertEqual(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8), working)
+    }
+
+    func testConflictEditorStageAndContinueMerge() throws {
+        try prepare(modified: false)
+        try prepareMergeConflict()
+        XCTAssertTrue(app.buttons["resolveConflict"].waitForExistence(timeout: 15))
+        app.buttons["resolveConflict"].click()
+        XCTAssertTrue(app.buttons["conflictUseTheirs"].waitForExistence(timeout: 10))
+        app.buttons["conflictUseTheirs"].click()
+        capture("Forky — three-way conflict editor")
+        app.windows.buttons["conflictStage"].click()
+        XCTAssertTrue(app.buttons["unstage:README.md"].waitForExistence(timeout: 10))
+        XCTAssertEqual(try git(["ls-files", "--unmerged"]), "")
+        XCTAssertEqual(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8), "THEIRS\n")
+        app.buttons["reviewGitOperation"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.windows.buttons["operationContinue"])
+        app.windows.buttons["operationContinue"].click()
+        waitFor(NSPredicate(format: "exists == false"), object: app.buttons["reviewGitOperation"])
+        XCTAssertEqual(try git(["rev-list", "--parents", "-1", "HEAD"]).split(separator: " ").count, 3)
+    }
+
+    func testCherryPickAndRevertSelectedCommit() throws {
+        try prepare(modified: false)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        try git(["switch", "-c", "source"])
+        try Data("feature\n".utf8).write(to: fixture.appendingPathComponent("feature.txt"))
+        try git(["add", "feature.txt"]); try git(["commit", "-m", "FeatureFromSource"])
+        try git(["switch", "main"])
+        app.buttons["refreshRepository"].click()
+        openCommitAction("FeatureFromSource", action: "Cherry-pick…")
+        app.windows.buttons["commitActionConfirm"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"])
+        XCTAssertEqual(try git(["log", "-1", "--format=%s"]).trimmingCharacters(in: .newlines), "FeatureFromSource")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.appendingPathComponent("feature.txt").path))
+        openCommitAction("FeatureFromSource", action: "Revert…")
+        app.windows.buttons["commitActionConfirm"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.appendingPathComponent("feature.txt").path))
+        XCTAssertEqual(try git(["log", "-1", "--format=%s"]).trimmingCharacters(in: .newlines), "Revert \"FeatureFromSource\"")
+    }
+
+    func testInteractiveRebaseEditRewordAndContinue() throws {
+        try prepare(modified: false)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        try Data("feature\n".utf8).write(to: fixture.appendingPathComponent("feature.txt"))
+        try git(["add", "feature.txt"]); try git(["commit", "-m", "OldRebaseMessage"])
+        let edited = try git(["rev-parse", "HEAD"]).trimmingCharacters(in: .newlines)
+        app.buttons["refreshRepository"].click()
+        openCommitAction("Create UI fixture", action: "Interactive Rebase After Here…")
+        let picker = app.popUpButtons["rebaseAction:" + edited]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), app.debugDescription)
+        picker.click(); app.menuItems["edit / reword"].click()
+        app.checkBoxes["rebaseAcknowledge"].click()
+        capture("Forky — interactive rebase plan")
+        app.windows.buttons["rebaseConfirm"].click()
+        XCTAssertTrue(app.buttons["reviewGitOperation"].waitForExistence(timeout: 15))
+        app.buttons["reviewGitOperation"].click()
+        let message = app.textViews["rebaseMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 10))
+        message.click(); message.typeKey("a", modifierFlags: .command); message.typeKey(.delete, modifierFlags: [])
+        typeUppercase("REWORDED", into: message)
+        app.buttons["rebaseAmend"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"])
+        XCTAssertEqual(try git(["log", "-1", "--format=%s"]).trimmingCharacters(in: .newlines), "REWORDED")
+        app.buttons["reviewGitOperation"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.windows.buttons["operationContinue"])
+        app.windows.buttons["operationContinue"].click()
+        waitFor(NSPredicate(format: "exists == false"), object: app.buttons["reviewGitOperation"])
+        XCTAssertEqual(try git(["branch", "--show-current"]).trimmingCharacters(in: .newlines), "main")
+    }
+
+    func testBrowseCapturedTreeAndBlameAfterNewCommit() throws {
+        try prepare(modified: false)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        let original = try git(["rev-parse", "HEAD"]).trimmingCharacters(in: .newlines)
+        openCommitAction("Create UI fixture", action: "Browse Tree / Blame…")
+        let file = app.sheets.staticTexts["README.md"].firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        file.click()
+        XCTAssertTrue(app.textViews["fileContent"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.textViews["fileContent"].value as? String, "# Forky UI fixture\n")
+        try Data("Later file bytes\n".utf8).write(to: fixture.appendingPathComponent("README.md"))
+        try git(["add", "README.md"]); try git(["commit", "-m", "LaterCommit"])
+        app.descendants(matching: .any).matching(identifier: "showBlame").firstMatch.click()
+        XCTAssertTrue(app.staticTexts[String(original.prefix(8))].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["# Forky UI fixture"].firstMatch.exists)
+        capture("Forky — captured file blame")
+        app.buttons["treeDone"].click()
+    }
+
+    func testAbortMergeRequiresExplicitDiscardApproval() throws {
+        try prepare(modified: false)
+        try prepareMergeConflict()
+        XCTAssertTrue(app.buttons["reviewGitOperation"].waitForExistence(timeout: 15))
+        app.buttons["reviewGitOperation"].click()
+        let abort = app.windows.buttons["operationAbort"]
+        XCTAssertTrue(abort.waitForExistence(timeout: 10))
+        XCTAssertFalse(abort.isEnabled)
+        app.checkBoxes["operationDiscard"].click()
+        abort.click()
+        waitFor(NSPredicate(format: "exists == false"), object: app.buttons["reviewGitOperation"])
+        XCTAssertEqual(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8), "OURS\n")
+        XCTAssertTrue(try git(["status", "--porcelain"]).isEmpty)
+    }
+
+    func testContextActionUsesClickedCommitNotPriorSelection() throws {
+        try prepare(rich: true, modified: false)
+        app.staticTexts["All Commits"].firstMatch.click()
+        let selected = app.tables["commitTable"].staticTexts["Render connected commit lanes"].firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 15))
+        selected.click()
+        let root = try git(["rev-list", "--max-parents=0", "HEAD"]).trimmingCharacters(in: .newlines)
+        let clicked = app.tables["commitTable"].staticTexts["Create UI fixture"].firstMatch
+        clicked.rightClick()
+        app.menuItems["Browse Tree / Blame…"].click()
+        XCTAssertTrue(app.sheets.staticTexts[root].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["treeDone"].click()
+    }
+
+    private func prepareMergeConflict() throws {
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        try git(["switch", "-c", "other"])
+        try Data("THEIRS\n".utf8).write(to: fixture.appendingPathComponent("README.md"))
+        try git(["add", "README.md"]); try git(["commit", "-m", "Theirs"])
+        try git(["switch", "main"])
+        try Data("OURS\n".utf8).write(to: fixture.appendingPathComponent("README.md"))
+        try git(["add", "README.md"]); try git(["commit", "-m", "Ours"])
+        XCTAssertThrowsError(try git(["merge", "--no-edit", "other"]))
+        app.buttons["refreshRepository"].click()
+    }
+
+    private func openCommitAction(_ subject: String, action: String) {
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        app.staticTexts["All Commits"].firstMatch.click()
+        let row = app.tables["commitTable"].staticTexts[subject].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        row.rightClick()
+        app.menuItems[action].click()
+    }
+
     private func confirmRemote() {
         let button = app.windows.buttons["remoteConfirm"]
         XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)

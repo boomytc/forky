@@ -18,6 +18,7 @@ struct WorkspaceView: View {
                                 .font(.callout).foregroundStyle(.orange).padding(10)
                         }
                         OperationStrip(store: store)
+                        OperationBanner(store: store)
                         switch store.section {
                         case .changes: ChangesView(store: store)
                         case .stashes: StashView(store: store)
@@ -77,6 +78,7 @@ struct WorkspaceView: View {
             case .stash(let request): StashSheet(request: request, store: store)
             case .creation(let kind): CreationSheet(kind: kind, store: store)
             case .activity: ActivityView(store: store)
+            case .advanced(let request): AdvancedSheet(request: request, store: store)
             }
         }
         .alert(store.notice?.title ?? "Git Error", isPresented: Binding(

@@ -16,7 +16,7 @@ struct StashRequest: Identifiable {
 }
 enum CreationKind: String { case clone, initialize }
 enum WorkspaceSheet: Identifiable {
-    case branch(BranchRequest), remote(RemoteRequest), stash(StashRequest), creation(CreationKind), activity
+    case branch(BranchRequest), remote(RemoteRequest), stash(StashRequest), creation(CreationKind), activity, advanced(AdvancedRequest)
     var id: String {
         switch self {
         case .branch(let request): "branch:" + request.id.uuidString
@@ -24,6 +24,7 @@ enum WorkspaceSheet: Identifiable {
         case .stash(let request): "stash:" + request.id.uuidString
         case .creation(let kind): kind.rawValue
         case .activity: "activity"
+        case .advanced(let request): "advanced:" + request.id.uuidString
         }
     }
 }

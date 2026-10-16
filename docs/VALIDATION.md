@@ -1,125 +1,137 @@
-# Validation — repository workflows
+# Validation — advanced Git workflows
 
-Executed **2026-10-16**, Apple Silicon / **macOS 27.0.1**, Xcode **27.0 (27A266a)**,
-Swift **6.4**, Apple Git **2.54.0**. Deployment target 14.0 is not runtime verification
-on macOS 14–26 or Intel.
+Executed **2026-10-16–17**, Apple Silicon / **macOS 27.0.1**, Xcode **27.0 (27A266a)**,
+Swift **6.4**, Apple Git **2.54.0**. macOS 14 deployment target is not broader runtime evidence.
 
 ## Executed gate
 
-- Source `swift test`: **55 passed**, 6 suites.
-- `./scripts/build.sh`: native app built during implementation.
+- Source `swift test`: **79 passed**, 7 suites, including parameterized edge-byte cases.
+- `./scripts/build.sh`: native app built successfully.
 - Full `/usr/bin/time -l ./scripts/test.sh`: **TEST SUCCEEDED**.
-- xcresult independently reports **68 passed, 0 failed, 0 skipped**:
-  **55 core + 13 actual macOS UI tests**.
-- Result bundle: `.artifacts/Forky-20261016-224731.xcresult`.
-- The Xcode test action rebuilds the app and test targets together. After that gate,
-  comment/documentation and error-only wording/tag refinements were followed by another
-  successful 55-test source run and final app build (including NUL stash-message rejection).
-- Ad-hoc signature verified with `codesign --verify --strict`; not notarization.
-- Connected Xcode MCP was unavailable; repository xcodebuild scripts used the actual
-  macOS destination. Initial automation authorization timed out before tests began;
-  after the human approved the system prompt, real UI tests ran successfully.
-- REA's Git worktree remained clean. No agent-created commit.
+- Independent xcresult summary: **99 passed, 0 failed, 0 skipped** = **79 core + 20 actual
+  macOS UI tests**. Reporter totals are used, not manual parameter-invocation additions.
+- Bundle: `.artifacts/Forky-20261017-001515.xcresult`.
+- After the full gate, an additional contradictory-marker fail-closed guard was checked
+  by another successful 79-test source run plus real conflict/merge and interactive-rebase
+  UI reruns (`advanced-core-final.log`, `advanced-operation-final.log`). The full 99-test
+  bundle predates that error-path refinement and a test-only bounded readiness wait;
+  normal-flow UI coverage was rerun. The final source test run passes all 79 tests.
+- Strict ad-hoc signature verification passed; not notarization.
+- No connected Xcode MCP was found; repository scripts ran the actual Mac. Existing
+  human-approved automation authorization remained usable.
+
+Based on human-created `b9b8949`; no agent commit. All writes target newly created
+isolated fixtures, never business repositories or actual remote accounts. Fork.app and
+REA source were not modified. No input-source, clipboard, global Git-config or OS
+security-setting changes were used for automation.
 
 ## Native UI coverage
 
-Existing six journeys remain: actual stage/commit/Git subject verification; unstage/root
-history; real merge graph/tag/summary/split diff/search; alphabetic input/shortcut isolation;
-local create/checkout; filtered explicit batch scope.
+All prior 13 journeys pass again: commit/history/unstage, graph/search/split, alphabetic
+input, filtered batch, local/tracking/historical branches, remote publish/sync/activity,
+clone/init, stash and cancellation. Seven new real journeys:
 
-Seven added journeys:
+1. Stage one line → inspect actual index → unstage a hunk → verify unchanged worktree.
+2. Real merge conflict → review stages → use Theirs → save/stage → verify no unmerged
+   entries → Continue → verify actual two-parent merge commit.
+3. Context-menu cherry-pick → verify file/commit → Revert → verify inverse commit/file removal.
+4. Interactive plan → edit/reword stop → type replacement message → amend → Continue →
+   verify actual message and restored branch.
+5. Captured tree/blob → advance fixture HEAD externally → Blame still shows original
+   content/SHA, not current working bytes.
+6. Abort remains disabled until explicit discard approval → native abort → verify bytes/clean state.
+7. Context-click a different commit from selection → tree footer identifies clicked OID.
 
-1. Add remote → first publish → verify server OID and local upstream configuration.
-2. Peer pushes to isolated bare server → Fetch (no worktree change) → Pull (file arrives)
-   → local outgoing commit → Push → verify server OID → activity → close activity.
-3. Clone a real temporary bare server → open → compare actual clone/server commit IDs.
-4. Initialize new directory → open → verify unborn main and clean worktree.
-5. Save stash → inspect actual diff → apply, keep recovery entry → drop separately,
-   independently verify stash list and preserved working-file bytes.
-6. Cancel a real delayed local fetch → cancellation notice → repository refreshed →
-   writes re-enabled → activity retains cancellation outcome.
-7. Fetch peer feature branch → create/checkout local tracking branch → verify upstream →
-   select historical root commit → create branch there, not at HEAD and without switching.
-
-All writes target new temporary fixtures. UI creation tests prefill source and parent
-from test-only environment values, then confirm through real native controls; the
-folder picker and arbitrary URL text entry are not thereby established. No user
-keyboard-source, clipboard, global Git config or OS security setting was changed.
-The human alone approved automation authorization.
+Select-All is an intentional editor command; alphabetic typing uses Shift without
+accidental Command shortcuts. Explicit screenshots are app-window-only.
 
 ## Core coverage
 
-The previous parser/process/repository/graph/paging regressions remain, including
-special NUL-framed paths, literal pathspec safety, rename direction, malformed/UTF-8
-failures, conflicts, root/merge diffs, stale index, linked worktrees, hooks, operation
-guards, process limits/deadlines/cancellation and frozen history under moving refs.
+24 added test declarations (some parameterized) cover:
 
-Added real-Git workflow tests cover:
+- Individual partial additions, reverse unstage, whole/separate hunks, unchanged worktree.
+- Literal Unicode/newline names, no-final-newline, empty-file insertion/deletion, CRLF,
+  combining characters in paths/content/author/summary.
+- Stale worktree/index/HEAD, binary/symlink and malformed patch rejection.
+- Base/ours/theirs, save-only retains unmerged state, explicit stage and merge Continue.
+- Conflict replacement retains POSIX permissions and a real extended attribute.
+- Stale edits/symlink destinations refuse without changing outside bytes.
+- Explicit modify/delete resolution.
+- Clean cherry-pick/revert, dirty refusal, conflict/Abort, stale Abort, empty cherry-pick Skip.
+- Rebase reorder/fixup/drop, captured onto, invalid plans, configured updateRefs protection.
+- Edit/reword/amend/Continue works after temporary editor input cleanup.
+- Real rebase conflict stage semantics, resolution/Continue and Skip.
+- Corrupt/symlink operation markers stay unknown, not idle.
+- Ignored obstructions block initial onto, cherry-pick/revert, pending Continue and restore
+  Abort, preserving local bytes and HEAD.
+- Private temporary input cleanup survives owner cancellation.
+- Frozen tree/blob/blame, nested newline names, binary/symlink and malformed blame distinctions.
 
-- Publish, clone, Fetch, fast-forward Pull and Push against an isolated real bare server.
-- Divergence rejects Pull and non-fast-forward Push; server/local heads are preserved.
-- Push excludes implicit tags/extra configured refspecs.
-- Stale configuration/HEAD, unsafe fetch mappings, mirrors and dirty Pull fail closed.
-- Upstream/ahead/behind facts and concrete vs symbolic remote identities.
-- Remote tracking checkout; dirty/stale/alias/existing-local-branch rejection.
-- Historical branch creation uses selected OID, without switching.
-- Stash preserves staged/unstaged split and opted-in untracked data.
-- Untracked exclusion, dirty apply refusal, stale/renumbered selector refusal.
-- Failed conflicted apply retains the recovery entry and exposes conflict status.
-- Exclusive creation refuses existing folders; failed clone retains reserved location.
-- Credential URL refusal before directory creation; absolute-path requirement.
-- Known HTTP authentication redaction without hiding unrelated source values.
-- Auxiliary metadata failure remains unknown and does not block local staging.
+Prior process, parser, history/ref races, collaboration, snapshot and four finalization/
+cancellation lifecycle regressions remain. ACL copying is production code; no bespoke
+ACL matrix ran. Metadata assertions directly cover mode and xattr, not every file flag.
 
-Four lifecycle regressions verify active/queued cancellation, cancellation during final
-reconciliation, both write/read failures, and single-use ownership. These are distinct
-from merely cancelling an active Git process.
+## Failures found and structural fixes
 
-## Observed brittleness and fixes
+- **Ignored overwrite:** pre-fix production-boundary test allowed rebase to overwrite
+  local ignored data and move HEAD. `advanced-ignored-before.log` retains three failed
+  expectations. HistorySafety now checks complete possible write paths BEFORE native
+  mutation, not a downstream reset/cleanup or guessed rollback. Related pending/restore/
+  commit replay regressions pass.
+- **Bytes vs graphemes:** CRLF parameter failed under Character-based suffix/split;
+  combining Unicode can also join protocol prefixes. Patch/blame now parse LF/ASCII
+  byte boundaries once, preserving payload—not stripping CR or normalizing text.
+- **Reverse patch:** -R swaps a/b prefixes; parser accepts both Git-produced directions.
+- **UI harness:** initial tree selector hit a disabled background README label. Native
+  hierarchy showed no selected tree row. Sheet-scoped selector passes focused and full runs.
+- **Command ownership:** HistoryCommand replaces divergent context/detail dispatch;
+  immutable clicked-vs-selected commit payload is covered by a distinct real UI test.
+- Operation controls are read once and fingerprinted; raw marker presence is no longer
+  independently reinterpreted as a boolean idle/active state.
 
-- Global literal pathspec mode interfered with stash cleanup. The pre-fix regression
-  left new.txt in the worktree after saving it; apply then correctly refused dirty state.
-  Controlled real-Git traces show stash invokes `git clean ... :/`: literal mode treats
-  that top-level magic as a filename. Literal mode is now scoped to caller file operands,
-  not exported to stash internals. No additional downstream clean/discard was added.
-- A root accessibility identifier hid the activity Done button from native automation.
-  Removed the unnecessary root override; native Done interaction now passes.
-- Sandboxed UI fixtures could not execute a generated shebang helper directly.
-  The owned test script is read by /bin/sh instead; no quarantine/security settings changed.
-- Earlier alphabetic bulk typeText/IME issues remain addressed by explicit Shift/no
-  Command key events and exact field/result checks—not proof of all input methods.
+## Measurements
 
-Successful logs retain Apple metadata-skipped and XCTest responsiveness/priority
-warnings. No Swift compiler error remains; warnings are not latency measurements.
+One warm/incremental full gate: **428.75 s elapsed**, **37.76 s user + 28.37 s system CPU**,
+BSD time maximum RSS **491.8 MiB**. These are runner-reported, NOT complete process-family
+CPU/peak memory; XCTest/LaunchServices apps/services are not all captured.
 
-## Measurements and limits
+Source core run was about 13 s; Xcode core phase reported 35.507 s. These environments
+and the prior 68-test task are not equivalent benchmarks. No cold-run, before/after
+product latency, agent-token accounting, large-repo throughput or speedup claim.
+Apple metadata-skipped and XCTest responsiveness/QoS warnings remain; they are not
+measurements of application responsiveness.
 
-One warm/incremental full test run: **297.51 s elapsed**, **29.20 s user + 20.73 s
-system CPU**, BSD time maximum RSS **348.7 MiB**. This is not complete process-family
-CPU/peak memory: XCTest/LaunchServices apps/services are not all represented. No
-equivalent before/after product benchmark or speedup is claimed.
+## Boundaries / unverified
 
-Unverified: live authenticated HTTPS/SSH/credential prompts, arbitrary remote/SSH helpers,
-push-upstream failure recovery on all custom mappings, external concurrent writers,
-all hooks/signing/filters, malicious config/symlink races, huge repos/ref/stash inventories,
-all descendant cleanup/crash scenarios, large split scrolling, all IME/multiline/shortcuts,
-folder picker entry, dark appearance/accessibility breadth, older OS/Intel or distribution.
+- Partial staging: regular tracked text modifications only, not added/deleted/renamed/
+  binary/mode-change files or submodules.
+- Conflict editor: regular UTF-8 and explicit deletion, not binary/symlink/directory/
+  rename conflicts or missing-parent recreation.
+- Rebase: complete linear range ≤200; no merge-preserving/arbitrary exec/mainline UI.
+  Reword is edit + explicit amend; squash accepts combined default messages. Unsupported
+  external todos refuse Continue/Skip. A new merge-start UI is still absent.
+- Checks are sequential, not cross-process atomic. Concurrent writers, malicious config/
+  symlink races, unusual filesystem normalization, crash recovery and huge inventories
+  are not verified or containment guarantees.
+- Live HTTPS/SSH/authentication, every hook/filter/signing/helper, arbitrary descendants,
+  cleanup retry after restart, all cancellation stages/ACLs/flags/permissions are unverified.
+- No syntax highlighting, blame-to-history navigation or all binary/LFS/submodule cases.
+  Oversized output refuses rather than silently truncating selectable data. GC may
+  remove retained objects. Broad IME/accessibility/dark-mode, older OS/Intel,
+  distribution signing/notarization and product-scale performance remain unverified.
 
-Pull remains FF-only. Conflict editing/continue/abort, hunk staging, advanced history
-operations, branch/tag lifecycle and account management are not implemented. Frozen
-history can become unreadable if external GC removes retained objects. Stash drop's
-preflight is not atomic against other Git clients.
+See [ADVANCED_WORKFLOWS.md](ADVANCED_WORKFLOWS.md) for actual user-facing steps/limits.
 
-## Local artifacts
+## Local evidence
 
-Ignored `.artifacts/` retains `workflows-core.log`, `workflows-build.log`,
-`workflows-final.log`, `workflows-summary.json`, focused/failed runs and bundles,
-`workflows-literal-boundary.log`, and window-only `workflows-remote.png`,
-`workflows-stash.png`, `workflows-activity.png`.
+Ignored `.artifacts/`: `advanced-core.log`, `advanced-build.log`, initial
+`advanced-ui.log`, fixed focused `advanced-blame.log`, `advanced-final.log`,
+`advanced-summary.json`, pre-fix ignored-obstruction log and result bundles.
+Window-only previews: `advanced-partial.png`, `advanced-conflict.png`,
+`advanced-rebase.png`, `advanced-blame.png`.
 
-Default XCTest failure diagnostics can contain desktop recordings; those remain local
-ignored artifacts, never bundled assets. Runnable app:
-`DerivedData/Build/Products/Debug/Forky.app` under `.artifacts/`.
+Default failed-test diagnostics can include desktop recordings; these remain local
+ignored evidence, never bundled assets. App:
+`.artifacts/DerivedData/Build/Products/Debug/Forky.app`.
 
-Previous alignment gate (42 tests): `.artifacts/Forky-20261016-214234.xcresult`.
-Current work builds on human-created base `a13008d`; no commit was created in this turn.
+Previous workflow gate: 68 passed in `.artifacts/Forky-20261016-224731.xcresult`.

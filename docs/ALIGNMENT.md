@@ -24,7 +24,11 @@ remain ignored artifacts, not bundled application assets.
 | Start working | Open worktree/subdirectory; clone or initialize a new folder; recent repositories |
 | Understand history | Real connected graph, frozen paging, literal message/body search, branch/tag badges |
 | Review a commit | Full SHA/parents/author/message, root/first-parent changes, unified or split diff |
-| Prepare a commit | File filters; explicit per-file/batch staging; staged-only commits; retained drafts |
+| Prepare a commit | Explicit file/batch/line/hunk stage and unstage; staged-only commits; retained drafts |
+| Resolve conflicts | Base / stage 2 / stage 3 and edited result; save-only or stage; Continue/Skip/Abort |
+| Apply history | Confirmed non-merge cherry-pick/revert, with conflict recovery |
+| Rewrite a range | Linear reorder/pick/edit-reword/squash/fixup/drop; captured onto; paused amendment |
+| Browse source | Captured commit tree and per-line blame, without checkout |
 | Work on an older commit | Select commit → Create Branch Here; source is that OID, not current HEAD; no implicit checkout |
 | Use a remote branch | Fetch → select concrete remote ref → create local tracking branch and checkout after confirmation |
 | First publication | Add remote → review destination → publish one branch → optional upstream setup |
@@ -47,15 +51,17 @@ No hidden network polling, auto-stash, force push or automatic history rewrite.
 - Stash application keeps recovery entries; pop remains absent.
 - Existing directories cannot be cloned/initialized into through this UI.
 - Credentials come from existing Git/SSH configuration, not a new account UI.
-- Split diff is line-pairing preview, not syntax/word diff or a hunk-staging model.
+- Split diff remains a preview; line staging has a separate complete canonical patch model.
+- Rebase accepts complete linear ranges, not arbitrary todo or merge-preserving plans.
+- Potential ignored local obstructions stop replay rather than being silently overwritten.
 
 ## Remaining gaps toward a full Git manager
 
 These are **not shipped claims**:
 
-1. Hunk/line staging and clearer binary/submodule inspection.
-2. Conflict editor plus explicit merge/rebase/cherry-pick/revert and continue/abort flows.
-3. File tree/blame, branch/tag rename/delete, stash pop, comparison tools and repository tabs.
+1. Partial added/deleted/renamed files, binary/submodule comparison and word diff.
+2. Complex conflicts; merge-start/mainline UI, merge-preserving rebase and richer message editing.
+3. File history/navigation from blame, branch/tag rename/delete, stash pop and repository tabs.
 4. Filesystem watching, larger-repository responsiveness/accessibility, credentials/account UI.
 5. Authenticated HTTPS/SSH, older macOS/Intel, release signing/notarization and optional AI.
 
