@@ -29,15 +29,17 @@ import Testing
     @Test func referencesPreserveAnnotatedTagIdentityAndUnknownCommitTargets() throws {
         let a = String(repeating: "a", count: 40), b = String(repeating: "b", count: 40)
         let records = [
-            ["refs/heads/main", a, "*", "", "commit", ""],
-            ["refs/tags/v1", b, " ", a, "tag", "commit"],
-            ["refs/tags/tree", b, " ", "", "tree", ""],
-            ["refs/tags/nested", b, " ", a, "tag", "tag"]
+            ["refs/heads/main", a, "*", "", "commit", "", ""],
+            ["refs/tags/v1", b, " ", a, "tag", "commit", ""],
+            ["refs/tags/tree", b, " ", "", "tree", "", ""],
+            ["refs/tags/nested", b, " ", a, "tag", "tag", ""],
+            ["refs/remotes/origin/HEAD", a, " ", "", "commit", "", "refs/remotes/origin/main"]
         ].map { $0.joined(separator: "\0") + "\0\n" }.joined()
         let refs = try GitParsers.references(Data(records.utf8))
         #expect(refs[0].isCurrent)
         #expect(refs[1].kind == .tag && refs[1].objectOID == b && refs[1].commitOID == a)
         #expect(refs[2].commitOID == nil && refs[3].commitOID == nil)
+        #expect(refs[4].symbolicTarget == "refs/remotes/origin/main")
         #expect(throws: GitError.self) { try GitParsers.references(Data("refs/heads/main\0oops\0".utf8)) }
         #expect(throws: GitError.self) { try GitParsers.references(Data((records + records).utf8)) }
     }

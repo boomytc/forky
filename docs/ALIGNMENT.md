@@ -1,54 +1,63 @@
-# Alignment with Fork workflows
+# Fork workflow alignment
 
-This is an independently implemented Git client, not a copy of Fork's code, assets,
-branding or licensing. The local Fork installation and user repositories were not opened
-or mutated for this iteration.
+Forky is independently implemented with original branding/assets, not recovered Fork
+code or a claim of full parity. The goal is a calm native client with explicit, complete
+workflows—not a collection of similar-looking inactive buttons.
 
-## Reference evidence
+## Reference scope
 
-Public Fork Mac screenshots inspected on 2026-10-16:
+Prior public [Mac overview](https://git-fork.com/images/carousel/carousel_mainMac.jpg),
+[diff screenshot](https://git-fork.com/images/carousel/carousel_commitviewMac2.jpg),
+[feature page](https://git-fork.com/) and [release notes](https://git-fork.com/releasenotes)
+informed the workflow inventory. Those older screenshots do not establish the exact
+current appearance/behavior of Fork 2.70.2. A fresh page fetch in this iteration was
+blocked by the network tool's fake-IP address guard; no guard was disabled.
 
-- [Commit graph / sidebar / summary](https://git-fork.com/images/carousel/carousel_mainMac.jpg)
-- [Side-by-side diff](https://git-fork.com/images/carousel/carousel_commitviewMac2.jpg)
-- [Feature inventory](https://git-fork.com/)
-- [Mac release notes](https://git-fork.com/releasenotes)
+Prior local static evidence remains in the separate REA investigation. Fork.app and
+business repositories were not opened/mutated for this iteration. Research images
+remain ignored artifacts, not bundled application assets.
 
-The screenshots show an older product presentation; they do **not** establish the exact
-appearance or behavior of installed Fork 2.70.2. Prior local static evidence remains in
-the separate REA investigation. Reference images are ignored research artifacts only,
-not bundled product resources.
+## Current outcomes
 
-## Implemented in this iteration
-
-| Reference workflow | Forky outcome |
+| Analyst/user task | Forky workflow |
 | --- | --- |
-| Dense commit list with connected lanes and refs | Native 25-point rows, merge lanes, branch/remote/tag badges, full identities in tooltips |
-| Branch/sidebar navigation | Collapsible groups, current-branch marker, live branch/tag filter, single-click history selection |
-| Commit investigation | Changes/Commit tabs, full SHA and parent IDs, author/email, complete message, selected file diff |
-| Message search | Debounced, literal case-insensitive Git search over the selected history; not a filter of loaded rows |
-| Stable paged history | Frozen root OIDs and refs; test advances HEAD between the 200th and 201st commits without gaps/duplicates |
-| Diff layout | Unified/split toggle, preserved old/new line numbers, aligned blanks and synchronized vertical scroll |
-| Stage/unstage workflow | Compact rows, double-click/context/button actions, confirmed explicit batches scoped to visible files |
-| Branch creation and checkout | Separate actions, reviewed HEAD, confirmation, dirty/ignored-file/other-worktree protection |
-| Draft editing | Soft 72-character summary guidance; preserve drafts in memory when changing repositories |
-| Native interaction | Resizable panes, status bar, original shortcuts plus new branch, Finder and copy actions |
+| Start working | Open worktree/subdirectory; clone or initialize a new folder; recent repositories |
+| Understand history | Real connected graph, frozen paging, literal message/body search, branch/tag badges |
+| Review a commit | Full SHA/parents/author/message, root/first-parent changes, unified or split diff |
+| Prepare a commit | File filters; explicit per-file/batch staging; staged-only commits; retained drafts |
+| Work on an older commit | Select commit → Create Branch Here; source is that OID, not current HEAD; no implicit checkout |
+| Use a remote branch | Fetch → select concrete remote ref → create local tracking branch and checkout after confirmation |
+| First publication | Add remote → review destination → publish one branch → optional upstream setup |
+| Synchronize | Review remote → Fetch / fast-forward-only Pull / non-force Push; show locally known ahead/behind |
+| Set work aside | Save stash, opt into untracked files, preview, apply with optional index restoration |
+| Retain recovery | Applying never drops the stash; explicit destructive drop is a separate confirmation |
+| Interrupt/recover context | Cancel the operation, finish cleanup/reconciliation, report actual state; repository-labelled activity |
 
-Forky's own green mark remains; repository content uses native system accent and semantic
-colors. No disabled fake remote/AI controls were added to suggest unimplemented functions.
+Primary synchronization actions have visible text; secondary actions remain compact.
+Sidebar covers changes/history/stashes/refs; confirmations identify repository, branch
+and effects. Disabled actions reflect missing prerequisites, not unimplemented features.
+No hidden network polling, auto-stash, force push or automatic history rewrite.
 
-## Important remaining gaps
+## Deliberate conservative differences
 
-Not full parity: remote authentication/fetch/pull/push, stash, hunk/line staging, merge
-conflict editor, interactive rebase, merge/cherry-pick/revert, graph collapsing, file
-tree/blame, repository tabs, clone/init, image comparison, automatic filesystem watching,
-and AI are still absent.
+- Pull stops on divergence. Merge/rebase policy is never guessed.
+- Branch checkout requires a completely clean worktree; no automatic stash/carryover.
+- No mirror remotes or fetch mappings outside the selected remote's tracking namespace.
+- No recursive submodule operations, automatic fetch pruning/tags or implicit multi-ref push.
+- Stash application keeps recovery entries; pop remains absent.
+- Existing directories cannot be cloned/initialized into through this UI.
+- Credentials come from existing Git/SSH configuration, not a new account UI.
+- Split diff is line-pairing preview, not syntax/word diff or a hunk-staging model.
 
-Split diff is a **line pairing preview**, not word-level alignment or syntax highlighting.
-Search is by commit message, not arbitrary authors/OIDs/file contents. Filtered search
-hides the graph because omitted commits would make contiguous ancestry misleading.
-A nested tag's direct commit target may be unknown for badges, though Git can resolve
-its history. A frozen view may become unreadable if external garbage collection removes
-its objects. Checkout is deliberately more conservative than clients that offer automatic
-stash or carrying changes between branches.
+## Remaining gaps toward a full Git manager
 
-See [VALIDATION.md](VALIDATION.md) for executed evidence and unavailable coverage.
+These are **not shipped claims**:
+
+1. Hunk/line staging and clearer binary/submodule inspection.
+2. Conflict editor plus explicit merge/rebase/cherry-pick/revert and continue/abort flows.
+3. File tree/blame, branch/tag rename/delete, stash pop, comparison tools and repository tabs.
+4. Filesystem watching, larger-repository responsiveness/accessibility, credentials/account UI.
+5. Authenticated HTTPS/SSH, older macOS/Intel, release signing/notarization and optional AI.
+
+The public Git transport boundary is verified with isolated real bare remotes, not live
+GitHub/GitLab accounts. See [VALIDATION.md](VALIDATION.md) for precise test coverage.

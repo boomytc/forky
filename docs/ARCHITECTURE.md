@@ -1,81 +1,102 @@
 # Forky architecture
 
-## First deliverable
-
-An independent macOS 14+ Git client with an actual local worktree → diff → index →
-commit loop. Not a binary/source copy of Fork. UI shell is SwiftUI; high-volume commit
-rows and selectable monospaced diff text use narrow AppKit bridges.
+Independent macOS 14+ Git client. SwiftUI owns the workspace, AppKit owns native
+commit tables and selectable diffs; Git invocation never lives in a view.
 
 ```text
-SwiftUI views / AppKit adapters
-    → @MainActor @Observable RepositoryStore
-    → ForkyCore.GitRepository
-    → cancellable AsyncGate
-    → GitProcessRunner (direct argv, bounded streams, deadline)
-    → /usr/bin/git
+SwiftUI / AppKit views
+  → @MainActor @Observable RepositoryStore / WorkspaceSheet
+  → single-use WriteLifecycle → operation → uncancelled reconciliation
+  → ForkyCore.GitRepository → AsyncGate → GitProcessRunner → Git CLI
 ```
 
-Each store owns its selection, open/refresh/detail/history generations and tasks.
-A new navigation or selection invalidates earlier responses before they can reach UI.
-Repository operations remain inside the gate through process exit and stream cleanup;
-queued cancellation releases the waiter without consuming the next permit.
+## Ownership and observations
 
-Mutations are explicit commands, not view side effects. While a mutation runs, opening
-another repository and write controls are disabled; normal application quit is refused.
-The index is re-read before committing. A write error and reconciliation error must not
-be interpreted as an automatic rollback. Keep the message after failed commits.
+Each store owns repository selection, draft, history/detail generations, tasks and one
+sheet route. Older responses cannot update a newer selection/session. Writes disable
+repository switching and normal quit until operation **and final state read** finish.
 
-## Source representations
+RepositorySnapshot owns worktree facts and an Observed<CollaborationSnapshot>.
+Auxiliary metadata failure remains unavailable-with-reason: it is not an empty
+remote/stash list and does not block unrelated local staging/commit. Collaboration
+owns configuration digest, remote definitions, Git-resolved tracking identity, locally
+observed ahead/behind counts and NUL-framed stash records. No live-server freshness
+is inferred from local tracking refs.
 
-Porcelain v1 -z, log NUL field framing, name-status -z and explicit ref fields each have
-one parser at the core boundary. GitReference is the sole ref representation for sidebar,
-history roots, checkout and graph badges; tag object OIDs remain separate from known
-commit targets. Non-commit/nested tag targets are not invented as commit decorations. Rename source/destination order differs between status
-and name-status and is modeled explicitly. Only validated full OIDs reach revision
-arguments. GitPath preserves whitespace/newlines and rejects non-UTF-8 / unsafe paths;
-display formatting never becomes a lookup identity.
+Porcelain v1 -z, log fields, name-status -z, explicit ref atoms and config -z each
+have one owning parser. GitReference preserves tag object vs commit identity and
+symbolic target. Aliases are not independent graph badges or checkout destinations.
+GitRemote owns tracking-namespace/name relationships; views do not guess them from
+the last slash. GitPath keeps source whitespace/newlines and rejects unsafe/non-UTF-8
+paths; display values are never lookup identities.
 
-Read snapshots are sequential observations, not atomic snapshots against external
-clients. HistoryCursor freezes root OIDs, ref metadata and normalized query for the
-whole paged view. External ref advances do not reorder subsequent pages; Refresh
-starts a new view. Selected refs are peeled by their captured object OID rather than
-rereading a mutable name; the ref-move-during-read regression exercises this boundary
-with real Git. Object deletion/GC can still make a retained root unreadable.
-The graph consumes Git's child-before-parent order and extends consistently across
-pages. Search can omit intermediate parents, so filtered results intentionally hide
-the connected graph rather than drawing false ancestry.
+Read snapshots are sequential, not cross-process atomic. HistoryCursor freezes root
+OIDs, refs and query. A selected ref is peeled by captured object OID, never reread
+by mutable name. Search omits graph edges because intermediate ancestors may be
+filtered out. Object GC may make retained roots unreadable. Refresh starts a new view.
 
-## Safety model
+## Explicit mutation contracts
 
-No shell interpolation, automatic add-all/checkout, force reset/clean/checkout, or network UI.
-Batch staging captures the explicit visible path list; the file filter owns both selection
-and batch scope. Branch requests capture repository root, HEAD and destination ref.
-The core rechecks operation state, clean worktree, HEAD and destination inside the gate.
-Git switch uses --no-overwrite-ignore, --no-guess and --no-recurse-submodules. Creation
-and checkout are separate operations; creation never implicitly switches.
-Filesystem identity belongs to the worktree resolved by Git, including linked worktrees.
-Global GIT_DIR/GIT_INDEX_FILE/GIT_CONFIG_* cannot silently select another target.
-Other normal Git settings remain effective; configured filters and hooks are trusted
-user code, not safely contained targets. Signed commit / hook prompts have no interactive
-terminal in this version; failures and timeouts remain visible.
+- Stage/unstage uses exactly the approved file paths. Filtered batch scope is visible.
+- Commit rechecks HEAD/index fingerprint, conflicts and operation state; no implicit add.
+- Local checkout rechecks HEAD/destination and clean worktree, protects ignored files,
+  avoids submodule recursion, and respects other worktrees.
+- New branch creation uses the reviewed HEAD **or selected historical OID**, without
+  checkout. Remote checkout separately confirms a new local name/tracking relationship.
+- Remote actions capture root, branch/HEAD, config digest and remote definitions.
+  Preflight fails if the reviewed configuration changed.
+- Fetch accepts only scoped tracking mappings; no prune/automatic tags/submodule recursion.
+- Pull fetches, rechecks, then merges only by fast-forward; no autostash or merge commit.
+  Fetch side effects can remain even when integration is rejected.
+- Push sends one immutable OID to an explicit branch ref; no force/mirror/follow-tags.
+  Optional upstream setup is a separate local step and may fail after push succeeds.
+- Stash save requires eligible changes; untracked inclusion is explicit. Apply uses OID,
+  requires a clean worktree and retains the recovery entry on success or conflict.
+  Drop checks the captured full list and selector/OID immediately before deletion.
+- Clone/init atomically reserves a new directory via mkdir. It never adopts an existing
+  directory or recursively removes an interrupted destination.
 
-The process runner owns one child and both nonblocking read sources on a serial queue.
-A task cancellation, timeout or output overflow stops that child and waits for exit.
-Inherited pipes have a post-exit drain deadline and produce incomplete-output failure.
-Descendant containment, hooks surviving the parent, and recovery after application
-crash are explicitly outside the first version's guarantee.
+These are preflight checks, not transactions against external clients. Concurrent
+external writers remain unsupported; an error never implies rollback.
 
-## Next steps, not shipped claims
+## Cancellation and completion
 
-1. Commit graph collapsing/expansion and file tree/blame.
-2. Hunk/line staging, binary and submodule detail. SplitDiff currently pairs adjacent
-   deletion/addition blocks for display only, preserving line numbers and hunk boundaries;
-   it is not a patch-editing model. AppKit owns paired scroll views and synchronizes only
-   vertical offsets, with observer cleanup.
-3. Dedicated repository activity/operation state, filesystem watching with coalescing.
-4. Deliberate remote authentication, fetch/pull/push UX and cancellation/reconciliation.
-5. Conflict resolution and rebase state handling.
-6. Opt-in AI with visible context, explicit local CLI configuration and no hidden uploads.
+WriteLifecycle is single-use, with pending/running/reconciling/finished phases. It
+owns the operation child and cancellation request; queued cancellation prevents the
+write. Caller cancellation propagates to the child only. Reconciliation is a fresh,
+uncancelled task and remains owned through completion, including mixed write/read
+failures. Late cancellation cannot cancel or skip it. Store consumes both results
+and does not enable writes on a failed refresh.
 
-Use temporary repositories for every new mutation regression. Add a real native UI
-journey for each user-visible write workflow before claiming it works.
+Activity is bounded to 30 session-local records, with repository identity and marked
+12,000-character detail previews. It is not a durable recovery/rollback journal.
+One item-driven WorkspaceSheet owns modal routing.
+
+## Process and transport boundary
+
+Direct argv, never product shell interpolation. File operands opt into literal pathspec
+mode only at their owning command. Global literal mode breaks stash's internal :/
+cleanup pathspec; controlled real-Git traces and the stash/index/untracked regression
+verify this boundary. Forky does not issue an extra downstream clean to repair it.
+
+The process runner owns one direct child, both nonblocking streams, output limits,
+deadline and post-exit drain. It holds the repository gate through cleanup. Local,
+transport and creation deadlines are 30/300/900 seconds; retained output is at most
+4 MiB per stream. Timeout copies retain the caller's executable and isolated environment.
+Ambient GIT_* redirection is discarded, not persisted.
+
+Known HTTP URL userinfo is redacted for presentation/transport errors. New source
+URLs reject embedded HTTP credentials; new local source paths must be absolute.
+Other Git settings remain effective: rewrite rules, SSH agent/config, credential and
+remote helpers, templates, signing and hooks are trusted user code. Terminal prompts
+are disabled. No credential/account store is added.
+
+Arbitrary descendants, malicious configuration, crash recovery and distribution
+are not containment guarantees. Failed/cancelled writes may have completed partially.
+
+## Remaining product work
+
+Hunk/line staging, merge conflict editing/continue/abort, merge/rebase/cherry-pick/revert,
+file tree/blame, tag/branch lifecycle, filesystem watching, account UX and broad platform/
+performance verification remain. Split diff pairs lines for display, not patch editing.
+See ALIGNMENT.md for scope and VALIDATION.md for executed evidence.

@@ -23,6 +23,8 @@ struct ForkyApp: App {
                 Button("Open Repository…", action: store.chooseRepository)
                     .keyboardShortcut("o")
                     .disabled(store.isMutating)
+                Button("Clone Repository…") { store.requestCreation(.clone) }.disabled(store.isBusy)
+                Button("Create Repository…") { store.requestCreation(.initialize) }.disabled(store.isBusy)
             }
             CommandGroup(after: .newItem) {
                 Button("Refresh Repository", action: store.refresh)
@@ -32,6 +34,15 @@ struct ForkyApp: App {
             CommandMenu("Repository") {
                 Button("Working Changes") { store.navigate(.changes) }.keyboardShortcut("1")
                 Button("All Commits") { store.navigate(.history) }.keyboardShortcut("2")
+                Button("Stashes") { store.navigate(.stashes) }.keyboardShortcut("3")
+                Divider()
+                Button("Fetch…") { store.requestRemote(.fetch) }.disabled(!store.canUseTools)
+                Button("Pull · Fast-forward Only…") { store.requestRemote(.pull) }.disabled(!store.canUseTools)
+                Button("Push / Publish…") { store.requestRemote(.push) }.disabled(!store.canUseTools)
+                Button("Add Remote…") { store.requestRemote(.add) }.disabled(!store.canUseTools)
+                Button("Stash Changes…") { store.requestStash(.save) }
+                    .keyboardShortcut("s", modifiers: [.command, .shift]).disabled(!store.canUseTools)
+                Button("Repository Activity…") { store.sheet = .activity }
                 Divider()
                 Button("New Branch…") { store.requestBranch() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])

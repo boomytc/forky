@@ -62,7 +62,8 @@ public enum GitParsers {
     public static func references(_ data: Data) throws -> [GitReference] {
         let result = try string(data).split(separator: "\n").map { line -> GitReference in
             let fields = line.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 7, fields[6].isEmpty, isOID(fields[1]),
+            guard fields.count == 8, fields[7].isEmpty, isOID(fields[1]),
+                  fields[6].isEmpty || fields[6].hasPrefix("refs/"),
                   ["*", " "].contains(fields[2]),
                   ["commit", "tag", "tree", "blob"].contains(fields[4]),
                   fields[3].isEmpty || isOID(fields[3]),
@@ -79,7 +80,8 @@ public enum GitParsers {
             guard fields[0].count > prefix.count else { throw GitError.malformedOutput("Empty ref name.") }
             let commitOID = fields[4] == "commit" ? fields[1] : (fields[5] == "commit" ? fields[3] : nil)
             return GitReference(fullName: fields[0], name: String(fields[0].dropFirst(prefix.count)),
-                                objectOID: fields[1], commitOID: commitOID, kind: kind, isCurrent: fields[2] == "*")
+                                objectOID: fields[1], commitOID: commitOID, kind: kind, isCurrent: fields[2] == "*",
+                                symbolicTarget: fields[6].isEmpty ? nil : fields[6])
         }
         guard Set(result.map(\.id)).count == result.count else { throw GitError.malformedOutput("Duplicate refs.") }
         return result

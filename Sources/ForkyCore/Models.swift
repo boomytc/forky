@@ -53,6 +53,7 @@ public struct GitReference: Identifiable, Equatable, Sendable {
     public let commitOID: String?
     public let kind: Kind
     public let isCurrent: Bool
+    public let symbolicTarget: String?
     public var id: String { fullName }
     public var isRemote: Bool { kind == .remoteBranch }
 }
@@ -85,6 +86,7 @@ public struct RepositorySnapshot: Sendable {
     public let references: [GitReference]
     public let indexFingerprint: String
     public let operationInProgress: Bool
+    public let collaboration: Observed<CollaborationSnapshot>
     public var branches: [GitReference] { references.filter { $0.kind != .tag } }
     public var tags: [GitReference] { references.filter { $0.kind == .tag } }
     public var staged: [FileChange] { changes.filter(\.isStaged) }

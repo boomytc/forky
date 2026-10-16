@@ -26,6 +26,9 @@ struct SidebarView: View {
                 Spacer(minLength: 0)
                 Menu {
                     Button("Open Repository…", action: store.chooseRepository)
+                    Button("Clone Repository…") { store.requestCreation(.clone) }
+                    Button("Create Repository…") { store.requestCreation(.initialize) }
+                    Divider()
                     ForEach(store.recentPaths, id: \.self) { path in
                         Button(URL(fileURLWithPath: path).lastPathComponent) { store.open(URL(fileURLWithPath: path)) }
                     }
@@ -44,6 +47,14 @@ struct SidebarView: View {
                 .tag(NavigationSection.changes).accessibilityIdentifier("changesNavigation")
                 Label("All Commits", systemImage: "clock.arrow.circlepath")
                     .tag(NavigationSection.history).accessibilityIdentifier("historyNavigation")
+                Label {
+                    HStack {
+                        Text("Stashes")
+                        Spacer()
+                        Text(store.tools.map { String($0.stashes.count) } ?? "?").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                } icon: { Image(systemName: "archivebox") }
+                .tag(NavigationSection.stashes).accessibilityIdentifier("stashesNavigation")
                 Section {
                     FilterField(prompt: "Filter branches and tags", text: $store.referenceQuery, identifier: "referenceFilter")
                         .listRowInsets(.init(top: 4, leading: 0, bottom: 7, trailing: 0))
@@ -58,7 +69,9 @@ struct SidebarView: View {
                             ForEach(snapshot.branches.filter { $0.isRemote && matches($0) }) { reference in
                                 referenceRow(reference)
                             }
-                            if snapshot.branches.allSatisfy({ !$0.isRemote }) { Text("No remote branches").foregroundStyle(.tertiary) }
+                            if snapshot.branches.allSatisfy({ !$0.isRemote }) { Text("No fetched branches").foregroundStyle(.tertiary) }
+                            Button("Add Remote…", systemImage: "plus") { store.requestRemote(.add) }
+                                .disabled(!store.canUseTools).accessibilityIdentifier("sidebarAddRemote")
                         }
                         DisclosureGroup("Tags", isExpanded: $tagsExpanded) {
                             ForEach(snapshot.tags.filter(matches)) { reference in referenceRow(reference) }
@@ -97,13 +110,13 @@ struct SidebarView: View {
         }
         .tag(NavigationSection.reference(reference.fullName))
         .accessibilityIdentifier("ref:" + reference.fullName)
-        .help(reference.fullName + (reference.kind == .localBranch ? " · Double-click to request checkout" : ""))
+        .help(reference.fullName + (reference.symbolicTarget.map { " → " + $0 } ?? (reference.kind != .tag ? " · Double-click to request checkout" : "")))
         .simultaneousGesture(TapGesture(count: 2).onEnded { store.requestBranch(reference) })
         .contextMenu {
             Button("Show History") { store.navigate(.reference(reference.fullName)) }
-            if reference.kind == .localBranch {
-                Button("Checkout Branch…") { store.requestBranch(reference) }
-                    .disabled(reference.isCurrent || !store.canWrite || store.snapshot?.head == nil)
+            if reference.kind != .tag {
+                Button(reference.kind == .remoteBranch ? "Checkout as Tracking Branch…" : "Checkout Branch…") { store.requestBranch(reference) }
+                    .disabled(!store.canCheckout(reference))
             }
             Divider()
             Button("Copy Reference Name") {

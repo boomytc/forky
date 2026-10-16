@@ -5,8 +5,12 @@ final class ForkyUITests: XCTestCase {
     private var fixture: URL!
     private var home: URL!
     private var app: XCUIApplication!
+    private var remoteURL: URL!
+    private var peerURL: URL!
 
-    private func prepare(rich: Bool = false, modified: Bool = true, extraFiles: Bool = false) throws {
+    private func prepare(rich: Bool = false, modified: Bool = true, extraFiles: Bool = false,
+                         remote: Bool = false, publish: Bool = true, openRepository: Bool = true,
+                         slowFetch: Bool = false) throws {
         continueAfterFailure = false
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Forky-UI-\(UUID())")
         fixture = directory.appendingPathComponent("Orbit")
@@ -48,10 +52,38 @@ final class ForkyUITests: XCTestCase {
                 try Data(name.utf8).write(to: fixture.appendingPathComponent(name))
             }
         }
+        if remote {
+            remoteURL = directory.appendingPathComponent("server.git")
+            try git(["init", "--bare", "--initial-branch=main", remoteURL.path], at: directory)
+            if publish {
+                try git(["remote", "add", "origin", remoteURL.path])
+                try git(["push", "--set-upstream", "origin", "main"])
+                peerURL = directory.appendingPathComponent("peer")
+                try git(["clone", "--no-hardlinks", remoteURL.path, peerURL.path], at: directory)
+                try git(["config", "user.name", "Peer UI"], at: peerURL)
+                try git(["config", "user.email", "peer@example.invalid"], at: peerURL)
+                try git(["config", "commit.gpgSign", "false"], at: peerURL)
+                try git(["config", "core.hooksPath", "/dev/null"], at: peerURL)
+                if slowFetch {
+                    let wrapper = directory.appendingPathComponent("slow-upload-pack")
+                    let real = URL(fileURLWithPath: try git(["--exec-path"]).trimmingCharacters(in: .newlines)).appendingPathComponent("git-upload-pack").path
+                    XCTAssertTrue(FileManager.default.isExecutableFile(atPath: real))
+                    let quoted = "'" + real.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                    try Data(("#!/bin/sh\n/bin/sleep 8\nexec " + quoted + " \"$@\"\n").utf8).write(to: wrapper)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+                    // Sandbox-created scripts are not executable by another app via shebang.
+                    // Read this owned fixture through the system interpreter; do not change OS security settings.
+                    let scriptPath = "'" + wrapper.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                    try git(["config", "remote.origin.uploadpack", "/bin/sh " + scriptPath])
+                }
+            }
+        }
         app = XCUIApplication()
+        app.launchEnvironment["FORKY_UI_TEST_PARENT"] = directory.path
+        app.launchEnvironment["FORKY_UI_TEST_SOURCE"] = remoteURL?.path ?? fixture.path
         let application = app!
         addTeardownBlock { await MainActor.run { application.terminate() } }
-        app.launchArguments = ["--repository", fixture.path, "--ui-testing"]
+        app.launchArguments = (openRepository ? ["--repository", fixture.path] : []) + ["--ui-testing"]
         app.launch()
     }
 
@@ -209,6 +241,185 @@ final class ForkyUITests: XCTestCase {
         }
     }
 
+    func testFetchPullPushAndActivity() throws {
+        try prepare(rich: true, modified: false, remote: true)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["fetchRemote"], timeout: 15)
+        try Data("Incoming UI change\n".utf8).write(to: peerURL.appendingPathComponent("incoming.txt"))
+        try git(["add", "--", "incoming.txt"], at: peerURL)
+        try git(["commit", "-m", "Incoming UI change"], at: peerURL)
+        try git(["push", "origin", "main"], at: peerURL)
+        app.buttons["fetchRemote"].click()
+        confirmRemote()
+        waitFor(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "↓1", "↓1"),
+                object: app.staticTexts["trackingStatus"], timeout: 15)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.appendingPathComponent("incoming.txt").path))
+        app.buttons["pullRemote"].click()
+        confirmRemote()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        XCTAssertEqual(try String(contentsOf: fixture.appendingPathComponent("incoming.txt"), encoding: .utf8), "Incoming UI change\n")
+        try git(["commit", "--allow-empty", "-m", "Outgoing UI change"])
+        app.buttons["refreshRepository"].click()
+        waitFor(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "↑1", "↑1"), object: app.staticTexts["trackingStatus"])
+        app.buttons["pushRemote"].click()
+        confirmRemote()
+        waitFor(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "↑0", "↑0"), object: app.staticTexts["trackingStatus"], timeout: 15)
+        XCTAssertEqual(try git(["rev-parse", "main"], at: remoteURL), try git(["rev-parse", "HEAD"]))
+        app.staticTexts["All Commits"].firstMatch.click()
+        XCTAssertTrue(app.tables["commitTable"].waitForExistence(timeout: 10))
+        capture("Forky — remote workflow")
+        app.buttons["showActivity"].click()
+        XCTAssertTrue(app.staticTexts["Fetch · origin"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Pull · origin"].exists)
+        XCTAssertTrue(app.staticTexts["Push · origin"].exists)
+        capture("Forky — activity")
+        app.buttons["activityDone"].click()
+    }
+
+    func testAddRemoteAndFirstPublish() throws {
+        try prepare(modified: false, remote: true, publish: false)
+        let add = app.buttons["addRemote"]
+        XCTAssertTrue(add.waitForExistence(timeout: 15))
+        add.click()
+        XCTAssertTrue(app.textFields["remoteURL"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textFields["remoteURL"].value as? String, remoteURL.path)
+        confirmRemote()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["pushRemote"])
+        app.buttons["pushRemote"].click()
+        XCTAssertTrue(app.textFields["pushDestination"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textFields["pushDestination"].value as? String, "main")
+        confirmRemote()
+        XCTAssertTrue(app.staticTexts["trackingStatus"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(try git(["config", "branch.main.remote"]).trimmingCharacters(in: .newlines), "origin")
+        XCTAssertEqual(try git(["config", "branch.main.merge"]).trimmingCharacters(in: .newlines), "refs/heads/main")
+        XCTAssertEqual(try git(["rev-parse", "main"], at: remoteURL), try git(["rev-parse", "HEAD"]))
+    }
+
+    func testCloneAndOpen() throws {
+        try prepare(modified: false, remote: true, openRepository: false)
+        XCTAssertTrue(app.buttons["welcomeClone"].waitForExistence(timeout: 10))
+        app.buttons["welcomeClone"].click()
+        let field = app.textFields["cloneSource"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, remoteURL.path)
+        typeUppercase("CLONED", into: app.textFields["creationName"])
+        let confirm = app.windows.buttons["creationConfirm"]
+        waitFor(NSPredicate(format: "enabled == true"), object: confirm)
+        confirm.click()
+        XCTAssertTrue(app.staticTexts["CLONED"].firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"])
+        let clone = fixture.deletingLastPathComponent().appendingPathComponent("CLONED")
+        XCTAssertEqual(try git(["rev-parse", "HEAD"], at: clone), try git(["rev-parse", "main"], at: remoteURL))
+        XCTAssertTrue(app.staticTexts["trackingStatus"].exists)
+    }
+
+    func testCreateAndOpenRepository() throws {
+        try prepare(modified: false, openRepository: false)
+        XCTAssertTrue(app.buttons["welcomeCreate"].waitForExistence(timeout: 10))
+        app.buttons["welcomeCreate"].click()
+        XCTAssertTrue(app.textFields["creationName"].waitForExistence(timeout: 5))
+        typeUppercase("CREATED", into: app.textFields["creationName"])
+        let confirm = app.windows.buttons["creationConfirm"]
+        waitFor(NSPredicate(format: "enabled == true"), object: confirm)
+        confirm.click()
+        XCTAssertTrue(app.staticTexts["CREATED"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        let created = fixture.deletingLastPathComponent().appendingPathComponent("CREATED")
+        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], at: created).trimmingCharacters(in: .newlines), "main")
+        XCTAssertEqual(try git(["status", "--porcelain"], at: created), "")
+    }
+
+    func testStashSavePreviewApplyAndDrop() throws {
+        try prepare()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["stashChanges"], timeout: 15)
+        app.buttons["stashChanges"].click()
+        let message = app.textFields["stashMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        typeUppercase("REVIEWED", into: message)
+        confirmStash()
+        XCTAssertTrue(app.staticTexts["Your working tree is clean."].waitForExistence(timeout: 15))
+        app.staticTexts["Stashes"].firstMatch.click()
+        let apply = app.buttons["applyStash"]
+        XCTAssertTrue(apply.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.textViews["diffText"].waitForExistence(timeout: 10))
+        XCTAssertTrue((app.textViews["diffText"].value as? String)?.contains("A visible change") == true)
+        capture("Forky — stash preview")
+        apply.click(); confirmStash()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"])
+        XCTAssertTrue(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8).contains("A visible change"))
+        XCTAssertFalse(try git(["stash", "list"]).isEmpty)
+        app.buttons["dropStash"].click(); confirmStash()
+        XCTAssertTrue(app.staticTexts["A safe place for unfinished work"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(try git(["stash", "list"]), "")
+        XCTAssertTrue(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8).contains("A visible change"))
+    }
+
+    func testCancelFetchStillReconcilesAndReenablesWrites() throws {
+        try prepare(remote: true, slowFetch: true)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["fetchRemote"], timeout: 15)
+        app.buttons["fetchRemote"].click(); confirmRemote()
+        let cancel = app.buttons["cancelOperation"]
+        let hasCancel = cancel.waitForExistence(timeout: 5)
+        if !hasCancel { print("FETCH FAILURE DETAILS", app.sheets.staticTexts.allElementsBoundByIndex.map { $0.value as? String ?? $0.label }) }
+        XCTAssertTrue(hasCancel, app.debugDescription)
+        cancel.click()
+        let ok = app.windows.buttons["OK"].firstMatch
+        XCTAssertTrue(ok.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Operation cancelled — review state"].firstMatch.exists, app.debugDescription)
+        ok.click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["stage:README.md"], timeout: 15)
+        XCTAssertTrue(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8).contains("A visible change"))
+        app.buttons["showActivity"].click()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "Cancellation completed", "Cancellation completed")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["activityDone"].click()
+    }
+
+    func testCheckoutRemoteAndCreateBranchAtSelectedCommit() throws {
+        try prepare(modified: false, remote: true)
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["fetchRemote"], timeout: 15)
+        try git(["switch", "-c", "feature/server"], at: peerURL)
+        try git(["commit", "--allow-empty", "-m", "Server feature"], at: peerURL)
+        try git(["push", "origin", "feature/server"], at: peerURL)
+        app.buttons["fetchRemote"].click(); confirmRemote()
+        let reference = app.staticTexts["origin/feature/server"].firstMatch
+        XCTAssertTrue(reference.waitForExistence(timeout: 15), app.debugDescription)
+        reference.rightClick()
+        app.menuItems["Checkout as Tracking Branch…"].click()
+        XCTAssertTrue(app.textFields["branchName"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textFields["branchName"].value as? String, "feature/server")
+        app.windows.buttons["checkoutBranchConfirm"].click()
+        waitFor(NSPredicate(format: "value == %@ OR label == %@", "feature/server", "feature/server"),
+                object: app.staticTexts["currentBranch"], timeout: 15)
+        XCTAssertEqual(try git(["config", "branch.feature/server.remote"]).trimmingCharacters(in: .newlines), "origin")
+        XCTAssertEqual(try git(["config", "branch.feature/server.merge"]).trimmingCharacters(in: .newlines), "refs/heads/feature/server")
+        app.staticTexts["All Commits"].firstMatch.click()
+        let root = app.tables["commitTable"].staticTexts["Create UI fixture"].firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 10))
+        root.click()
+        let menu = app.descendants(matching: .any).matching(identifier: "commitActions").firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.click()
+        app.menuItems["Create Branch Here…"].click()
+        XCTAssertTrue(app.textFields["branchName"].waitForExistence(timeout: 5))
+        typeUppercase("HISTORIC", into: app.textFields["branchName"])
+        app.windows.buttons["createBranchConfirm"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"])
+        XCTAssertEqual(try git(["rev-parse", "HISTORIC"]), try git(["rev-list", "--max-parents=0", "HEAD"]))
+        XCTAssertEqual(try git(["branch", "--show-current"]).trimmingCharacters(in: .newlines), "feature/server")
+    }
+
+    private func confirmRemote() {
+        let button = app.windows.buttons["remoteConfirm"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)
+        waitFor(NSPredicate(format: "enabled == true"), object: button)
+        button.click()
+    }
+
+    private func confirmStash() {
+        let button = app.windows.buttons["stashConfirm"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)
+        waitFor(NSPredicate(format: "enabled == true"), object: button)
+        button.click()
+    }
+
     private func waitFor(_ predicate: NSPredicate, object: Any, timeout: TimeInterval = 10,
                          file: StaticString = #filePath, line: UInt = #line) {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: object)
@@ -244,14 +455,17 @@ final class ForkyUITests: XCTestCase {
         add(attachment)
     }
 
+    private var gitExecutable: String {
+        ProcessInfo.processInfo.environment["FORKY_TEST_GIT_EXECUTABLE"] ?? "/usr/bin/git"
+    }
+
     @discardableResult
-    private func git(_ arguments: [String]) throws -> String {
+    private func git(_ arguments: [String], at directory: URL? = nil) throws -> String {
         let process = Process()
         // The macOS UI test runner is sandboxed; /usr/bin/git is an xcrun shim.
         // Xcode expands this scheme variable to its real Git executable.
-        let gitPath = ProcessInfo.processInfo.environment["FORKY_TEST_GIT_EXECUTABLE"] ?? "/usr/bin/git"
-        process.executableURL = URL(fileURLWithPath: gitPath)
-        process.arguments = ["-C", fixture.path] + arguments
+        process.executableURL = URL(fileURLWithPath: gitExecutable)
+        process.arguments = ["-C", (directory ?? fixture).path] + arguments
         process.environment = ["HOME": home.path, "XDG_CONFIG_HOME": home.path, "PATH": "/usr/bin:/bin", "GIT_TERMINAL_PROMPT": "0"]
         let pipe = Pipe()
         process.standardOutput = pipe

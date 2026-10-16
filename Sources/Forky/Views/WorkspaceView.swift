@@ -17,8 +17,12 @@ struct WorkspaceView: View {
                             Label("Repository state is stale. Refresh before making changes.", systemImage: "exclamationmark.triangle")
                                 .font(.callout).foregroundStyle(.orange).padding(10)
                         }
-                        if store.section == .changes { ChangesView(store: store) }
-                        else { HistoryView(store: store) }
+                        OperationStrip(store: store)
+                        switch store.section {
+                        case .changes: ChangesView(store: store)
+                        case .stashes: StashView(store: store)
+                        case .history, .reference: HistoryView(store: store)
+                        }
                         StatusBar(store: store)
                     }.id(store.repository?.root)
                 }
@@ -30,23 +34,35 @@ struct WorkspaceView: View {
         .navigationSubtitle(store.snapshot?.branchLabel ?? "A little clarity for your Git workflow.")
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button("Open Repository", systemImage: "folder.badge.plus", action: store.chooseRepository)
-                    .labelStyle(.iconOnly).help("Open repository · ⌘O").disabled(store.isMutating)
-                    .accessibilityIdentifier("openRepository")
+                Menu {
+                    Button("Open Repository…", action: store.chooseRepository)
+                    Button("Clone Repository…") { store.requestCreation(.clone) }
+                    Button("Create Repository…") { store.requestCreation(.initialize) }
+                    Divider()
+                    Button("Show in Finder") {
+                        if let root = store.repository?.root { NSWorkspace.shared.activateFileViewerSelecting([root]) }
+                    }.disabled(store.repository == nil)
+                } label: { Label("Repositories", systemImage: "folder.badge.plus") }
+                    .labelStyle(.iconOnly).help("Open, clone or create repository").disabled(store.isBusy)
+                    .accessibilityIdentifier("repositoryMenu")
             }
+            ToolbarItem(placement: .automatic) { SyncControls(store: store) }
             ToolbarItem(placement: .automatic) {
                 Button("New Branch", systemImage: "arrow.triangle.branch") { store.requestBranch() }
-                    .labelStyle(.titleAndIcon).help("Create branch at HEAD · ⇧⌘N")
+                    .labelStyle(.iconOnly).help("Create branch at HEAD · ⇧⌘N")
                     .disabled(!store.canWrite || store.snapshot?.head == nil).accessibilityIdentifier("newBranch")
             }
             ToolbarItem(placement: .automatic) {
-                Button("Show in Finder", systemImage: "folder") {
-                    if let root = store.repository?.root { NSWorkspace.shared.activateFileViewerSelecting([root]) }
-                }.help("Reveal repository in Finder").disabled(store.repository == nil)
+                Button("Stash Changes", systemImage: "archivebox") { store.requestStash(.save) }
+                    .labelStyle(.iconOnly).help("Save unfinished changes · ⇧⌘S")
+                    .disabled(!store.canUseTools || store.snapshot?.head == nil || store.snapshot?.changes.isEmpty != false)
+                    .accessibilityIdentifier("stashChanges")
             }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {
-                    if store.isBusy { ProgressView().controlSize(.small) }
+                    if store.isLoading || store.isRefreshing { ProgressView().controlSize(.small) }
+                    Button("Activity", systemImage: "clock") { store.sheet = .activity }
+                        .labelStyle(.iconOnly).help("Recent Git operations").accessibilityIdentifier("showActivity")
                     Button("Refresh", systemImage: "arrow.clockwise", action: store.refresh)
                         .labelStyle(.iconOnly).help("Refresh repository · ⌘R")
                         .disabled(store.repository == nil || store.isBusy)
@@ -54,7 +70,15 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .sheet(item: $store.branchRequest) { request in BranchSheet(request: request, store: store) }
+        .sheet(item: $store.sheet) { sheet in
+            switch sheet {
+            case .branch(let request): BranchSheet(request: request, store: store)
+            case .remote(let request): RemoteSheet(request: request, store: store)
+            case .stash(let request): StashSheet(request: request, store: store)
+            case .creation(let kind): CreationSheet(kind: kind, store: store)
+            case .activity: ActivityView(store: store)
+            }
+        }
         .alert(store.notice?.title ?? "Git Error", isPresented: Binding(
             get: { store.notice != nil }, set: { if !$0 { store.notice = nil } }
         )) {
@@ -82,7 +106,12 @@ private struct WelcomeView: View {
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .padding(.top, 28).disabled(store.isLoading)
                 .accessibilityIdentifier("welcomeOpenRepository")
-            Text("⌘O  ·  Your files stay on your Mac")
+            HStack(spacing: 12) {
+                Button("Clone Repository…") { store.requestCreation(.clone) }.accessibilityIdentifier("welcomeClone")
+                Button("Create Repository…") { store.requestCreation(.initialize) }.accessibilityIdentifier("welcomeCreate")
+            }.padding(.top, 12).disabled(store.isBusy)
+            OperationStrip(store: store).frame(maxWidth: 580).padding(.top, store.isMutating ? 18 : 0)
+            Text("⌘O  ·  No automatic network operations")
                 .font(.caption).foregroundStyle(.tertiary).padding(.top, 12)
             if store.isLoading { ProgressView("Opening repository…").padding(.top, 20) }
             if !store.recentPaths.isEmpty {
@@ -118,6 +147,8 @@ private struct StatusBar: View {
         HStack(spacing: 8) {
             Circle().fill(store.snapshotIsCurrent ? ForkyTheme.accent : .orange).frame(width: 6, height: 6)
             Text(store.activity)
+            Divider().frame(height: 11)
+            TrackingStatus(store: store)
             Spacer()
             if let snapshot = store.snapshot {
                 Text("\(snapshot.changes.count) changed · \(snapshot.staged.count) staged")

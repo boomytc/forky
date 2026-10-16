@@ -3,8 +3,8 @@ import CryptoKit
 
 public struct GitRepository: Sendable {
     public let root: URL
-    private let runner: GitProcessRunner
-    private let gate = AsyncGate()
+    let runner: GitProcessRunner
+    let gate = AsyncGate()
     public static let historyPageSize = 200
 
     private init(root: URL, runner: GitProcessRunner) {
@@ -76,10 +76,10 @@ public struct GitRepository: Sendable {
             let result: GitProcessResult
             if change.isUntracked {
                 guard side == .worktree else { return "" }
-                result = try await command(common + ["--no-index", "--", "/dev/null", change.path.value], accepted: [0, 1])
+                result = try await command(common + ["--no-index", "--", "/dev/null", change.path.value], accepted: [0, 1], literalPaths: true)
             } else {
                 let paths = side == .staged ? change.unstagePaths : change.stagePaths
-                result = try await command(common + (side == .staged ? ["--cached"] : []) + ["--"] + paths)
+                result = try await command(common + (side == .staged ? ["--cached"] : []) + ["--"] + paths, literalPaths: true)
             }
             return try GitParsers.string(result.stdout)
         }
@@ -105,7 +105,7 @@ public struct GitRepository: Sendable {
             } else {
                 args = ["show", "--format=", "--root"] + safety + [commit.oid, "--"] + file.pathspecs
             }
-            return try GitParsers.string(try await command(args).stdout)
+            return try GitParsers.string(try await command(args, literalPaths: true).stdout)
         }
     }
 
@@ -115,7 +115,7 @@ public struct GitRepository: Sendable {
         guard !changes.isEmpty else { return }
         try await gate.withPermit {
             let paths = Array(Set(changes.flatMap(\.stagePaths))).sorted()
-            _ = try await command(["add", "--"] + paths, write: true)
+            _ = try await command(["add", "--"] + paths, write: true, literalPaths: true)
         }
     }
 
@@ -126,14 +126,14 @@ public struct GitRepository: Sendable {
         try await gate.withPermit {
             let paths = Array(Set(changes.flatMap(\.unstagePaths))).sorted()
             if try await headOID() == nil {
-                _ = try await command(["rm", "--cached", "--ignore-unmatch", "--"] + paths, write: true)
+                _ = try await command(["rm", "--cached", "--ignore-unmatch", "--"] + paths, write: true, literalPaths: true)
             } else {
-                _ = try await command(["restore", "--staged", "--"] + paths, write: true)
+                _ = try await command(["restore", "--staged", "--"] + paths, write: true, literalPaths: true)
             }
         }
     }
 
-    public func createBranch(name: String, expectedHead: String) async throws {
+    public func createBranch(name: String, expectedHead: String, startingAt startOID: String? = nil) async throws {
         guard !name.isEmpty, !name.hasPrefix("-"), !name.utf8.contains(0) else { throw GitError.invalidBranchName }
         try await gate.withPermit {
             let fresh = try await readSnapshot()
@@ -141,7 +141,9 @@ public struct GitRepository: Sendable {
             guard fresh.head == expectedHead, GitParsers.isOID(expectedHead) else { throw GitError.staleRepository }
             // Validate the literal ref, not --branch's @{-1} shorthand expansion.
             _ = try await command(["check-ref-format", "refs/heads/" + name])
-            _ = try await command(["branch", "--", name, expectedHead], write: true)
+            let start = startOID ?? expectedHead
+            guard GitParsers.isOID(start) else { throw GitError.invalidInput("Select a valid commit identity.") }
+            _ = try await command(["branch", "--", name, start], write: true)
         }
     }
 
@@ -179,20 +181,23 @@ public struct GitRepository: Sendable {
         }
     }
 
-    private func command(_ arguments: [String], accepted: Set<Int32> = [0], write: Bool = false) async throws -> GitProcessResult {
-        var args = ["--no-pager", "--literal-pathspecs", "-c", "color.ui=false", "-c", "core.quotepath=false",
+    func command(_ arguments: [String], accepted: Set<Int32> = [0], write: Bool = false, network: Bool = false, literalPaths: Bool = false) async throws -> GitProcessResult {
+        var args = ["--no-pager", "-c", "color.ui=false", "-c", "core.quotepath=false",
                     "-c", "core.fsmonitor=false", "-C", root.path]
+        // Only caller-owned file arguments are literal. Exporting this mode globally
+        // breaks stash's internal :/ (top) cleanup pathspec and can leave saved files behind.
+        if literalPaths { args.insert("--literal-pathspecs", at: 0) }
         if !write { args.insert("--no-optional-locks", at: 0) }
-        let output = try await runner.run(args + arguments)
+        let output = try await (network ? runner.withTimeout(300) : runner).run(args + arguments)
         guard accepted.contains(output.status) else {
             throw GitError.commandFailed(output.status, String(decoding: output.stderr, as: UTF8.self))
         }
         return output
     }
 
-    private func readReferences() async throws -> [GitReference] {
+    func readReferences() async throws -> [GitReference] {
         let output = try await command(["for-each-ref",
-            "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(*objectname)%00%(objecttype)%00%(*objecttype)%00",
+            "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(*objectname)%00%(objecttype)%00%(*objecttype)%00%(symref)%00",
             "refs/heads/", "refs/remotes/", "refs/tags/"])
         return try GitParsers.references(output.stdout)
     }
@@ -205,7 +210,7 @@ public struct GitRepository: Sendable {
         return oid
     }
 
-    private func readSnapshot() async throws -> RepositorySnapshot {
+    func readSnapshot() async throws -> RepositorySnapshot {
         let status = try await command(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
         let changes = try GitParsers.status(status.stdout)
         let head = try await headOID()
@@ -224,8 +229,12 @@ public struct GitRepository: Sendable {
         let gitDirectory = URL(fileURLWithPath: gitPath, isDirectory: true)
         let inProgress = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"]
             .contains { FileManager.default.fileExists(atPath: gitDirectory.appendingPathComponent($0).path) }
+        let collaboration: Observed<CollaborationSnapshot>
+        do { collaboration = .available(try await readCollaboration(head: head, branch: branch, references: references)) }
+        catch is CancellationError { throw CancellationError() }
+        catch { collaboration = .unavailable(error.localizedDescription) }
         return RepositorySnapshot(root: root, head: head, branch: branch, changes: changes,
                                   references: references, indexFingerprint: fingerprint,
-                                  operationInProgress: inProgress)
+                                  operationInProgress: inProgress, collaboration: collaboration)
     }
 }

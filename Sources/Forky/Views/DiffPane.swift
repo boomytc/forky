@@ -11,9 +11,9 @@ struct DiffPane: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text").foregroundStyle(.secondary)
-                Text(store.selectedFileName ?? "Diff Preview").font(.system(size: 11, design: .monospaced))
+                Text(store.diffTitle ?? "Diff Preview").font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                    .help(store.selectedFileName ?? "")
+                    .help(store.diffTitle ?? "")
                 Spacer(minLength: 4)
                 if store.diff.additions > 0 { Text("+\(store.diff.additions)").foregroundStyle(.green).monospacedDigit() }
                 if store.diff.deletions > 0 { Text("−\(store.diff.deletions)").foregroundStyle(.red).monospacedDigit() }
@@ -23,7 +23,7 @@ struct DiffPane: View {
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 126).accessibilityIdentifier("diffLayout")
             }.font(.system(size: 10)).padding(.horizontal, 10).frame(height: 34)
             Divider()
-            if store.diffMode == .split && store.selectedFileName != nil {
+            if store.diffMode == .split && store.diffTitle != nil {
                 HStack {
                     Text(store.selectedChange?.side == .worktree && store.section == .changes ? "Index / before" : "Before")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -35,7 +35,7 @@ struct DiffPane: View {
                 ProgressView("Loading diff…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = store.diffError {
                 EmptyPane(icon: "exclamationmark.triangle", title: "Preview unavailable", subtitle: error)
-            } else if store.selectedFileName == nil {
+            } else if store.diffTitle == nil {
                 EmptyPane(icon: "rectangle.split.2x1", title: "A closer look", subtitle: "Select a changed file to inspect its diff.")
             } else if store.diff.text.isEmpty {
                 EmptyPane(icon: "doc", title: "No text diff", subtitle: "The selected file has no text changes to display. File modes or binary content may have changed.")

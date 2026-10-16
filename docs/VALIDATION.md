@@ -1,107 +1,125 @@
-# Validation — workflow alignment iteration
+# Validation — repository workflows
 
-Executed on **2026-10-16**, Apple Silicon, **macOS 27.0.1**, **Xcode 27.0
-(27A266a)**, **Swift 6.4**, Apple Git **2.54.0**. Deployment target remains
-macOS 14.0; runtime on macOS 14–26 and Intel is not established.
+Executed **2026-10-16**, Apple Silicon / **macOS 27.0.1**, Xcode **27.0 (27A266a)**,
+Swift **6.4**, Apple Git **2.54.0**. Deployment target 14.0 is not runtime verification
+on macOS 14–26 or Intel.
 
-## Final gate
+## Executed gate
 
-- `swift test`: **36 core tests passed**, 4 suites.
-- `./scripts/build.sh`: native arm64 app built successfully during implementation.
-- Final `/usr/bin/time -l ./scripts/test.sh`: **TEST SUCCEEDED**.
-- Result: **42 passed, 0 failed, 0 skipped**, independently read from xcresult summary:
-  **36 core + 6 actual macOS UI tests**.
-- Result bundle: `.artifacts/Forky-20261016-214234.xcresult`.
-- The final Xcode test action rebuilds the application and tests together.
-- `codesign --verify --strict`: local ad-hoc app signature valid. This is not notarization.
-- No connected Xcode MCP tools were available; the native Xcode project and actual
-  macOS destination were built/tested through the repository's xcodebuild scripts.
+- Source `swift test`: **55 passed**, 6 suites.
+- `./scripts/build.sh`: native app built during implementation.
+- Full `/usr/bin/time -l ./scripts/test.sh`: **TEST SUCCEEDED**.
+- xcresult independently reports **68 passed, 0 failed, 0 skipped**:
+  **55 core + 13 actual macOS UI tests**.
+- Result bundle: `.artifacts/Forky-20261016-224731.xcresult`.
+- The Xcode test action rebuilds the app and test targets together. After that gate,
+  comment/documentation and error-only wording/tag refinements were followed by another
+  successful 55-test source run and final app build (including NUL stash-message rejection).
+- Ad-hoc signature verified with `codesign --verify --strict`; not notarization.
+- Connected Xcode MCP was unavailable; repository xcodebuild scripts used the actual
+  macOS destination. Initial automation authorization timed out before tests began;
+  after the human approved the system prompt, real UI tests ran successfully.
+- REA's Git worktree remained clean. No agent-created commit.
 
-## Real native UI journeys
+## Native UI coverage
 
-1. Working diff → stage → type message → commit staged → clean worktree, with
-   independent real Git subject verification.
-2. Stage → unstage → All Commits → native table/root-commit diff.
-3. A genuinely branched/merged/tagged temporary repository → split diff with distinct
-   old/new content → graph/tag badge → full merge summary → message search → clear.
-4. Uppercase CREATE → filtered root commit; uppercase NEEDLE → no matches.
-   Assert no unintended New Branch sheet, including uppercase N.
-5. Type UIFEATURE → create without switching → branch context menu → confirm
-   checkout → independently verify current branch and clean status with Git.
-6. Type KEEP file filter → confirm staging exactly two listed files → independently
-   verify index paths → confirm unstage → clear filter → all files still exist.
+Existing six journeys remain: actual stage/commit/Git subject verification; unstage/root
+history; real merge graph/tag/summary/split diff/search; alphabetic input/shortcut isolation;
+local create/checkout; filtered explicit batch scope.
 
-All fixtures are newly created temporary repositories. Fixture HOME is outside the
-worktree. No write test targets user repositories or Fork.app.
+Seven added journeys:
 
-## Core regressions
+1. Add remote → first publish → verify server OID and local upstream configuration.
+2. Peer pushes to isolated bare server → Fetch (no worktree change) → Pull (file arrives)
+   → local outgoing commit → Push → verify server OID → activity → close activity.
+3. Clone a real temporary bare server → open → compare actual clone/server commit IDs.
+4. Initialize new directory → open → verify unborn main and clean worktree.
+5. Save stash → inspect actual diff → apply, keep recovery entry → drop separately,
+   independently verify stash list and preserved working-file bytes.
+6. Cancel a real delayed local fetch → cancellation notice → repository refreshed →
+   writes re-enabled → activity retains cancellation outcome.
+7. Fetch peer feature branch → create/checkout local tracking branch → verify upstream →
+   select historical root commit → create branch there, not at HEAD and without switching.
 
-Existing parser/process/repository coverage remains: NUL-framed special filenames,
-renames, malformed/non-UTF-8 rejection, conflicts, log bodies, diff numbering/truncation,
-unborn repositories, explicit staged-only commits, stale index, linked worktrees,
-failed hooks, ongoing operations, disabled external diff, ambient Git redirection,
-process limits/deadline/cancellation/launch failure and cancelled gate waiters.
+All writes target new temporary fixtures. UI creation tests prefill source and parent
+from test-only environment values, then confirm through real native controls; the
+folder picker and arbitrary URL text entry are not thereby established. No user
+keyboard-source, clipboard, global Git config or OS security setting was changed.
+The human alone approved automation authorization.
 
-Added coverage:
+## Core coverage
 
-- Merge graph parent edges, disconnected roots, page-prefix layout stability.
-- Annotated tag object vs commit identity; non-commit/nested target uncertainty.
-- Split line pairing, unequal blocks, hunk boundaries and no-newline markers.
-- Explicit batch path scope and unborn unstaging without deleting files.
-- Create without switching; invalid branch names and shorthand rejection.
-- Dirty/untracked worktree protection, ignored file preservation and other-worktree
-  ownership; stale HEAD and moved destination rejection.
-- Literal case-insensitive message/body search and annotated-tag history.
-- 205 commits paged across an external ref advance without missing/duplicate commits.
-- Ref advances **during** its metadata read: a test wrapper lets real Git emit old
-  facts, advances the real temporary ref, then returns. This test was observed failing
-  before the fix and passing after peeling the captured object OID instead of rereading
-  the mutable name. Raw ref/log outputs are from real Git, not fabricated fixtures.
+The previous parser/process/repository/graph/paging regressions remain, including
+special NUL-framed paths, literal pathspec safety, rename direction, malformed/UTF-8
+failures, conflicts, root/merge diffs, stale index, linked worktrees, hooks, operation
+guards, process limits/deadlines/cancellation and frozen history under moving refs.
 
-## Harness findings
+Added real-Git workflow tests cover:
 
-Early native UI attempts hit Touch Bar mirrors when querying confirmation buttons;
-queries now scope alerts to real windows.
+- Publish, clone, Fetch, fast-forward Pull and Push against an isolated real bare server.
+- Divergence rejects Pull and non-fast-forward Push; server/local heads are preserved.
+- Push excludes implicit tags/extra configured refspecs.
+- Stale configuration/HEAD, unsafe fetch mappings, mirrors and dirty Pull fail closed.
+- Upstream/ahead/behind facts and concrete vs symbolic remote identities.
+- Remote tracking checkout; dirty/stale/alias/existing-local-branch rejection.
+- Historical branch creation uses selected OID, without switching.
+- Stash preserves staged/unstaged split and opted-in untracked data.
+- Untracked exclusion, dirty apply refusal, stale/renumbered selector refusal.
+- Failed conflicted apply retains the recovery entry and exposes conflict status.
+- Exclusive creation refuses existing folders; failed clone retains reserved location.
+- Credential URL refusal before directory creation; absolute-path requirement.
+- Known HTTP authentication redaction without hiding unrelated source values.
+- Auxiliary metadata failure remains unknown and does not block local staging.
 
-With the active non-Latin input source, bulk `typeText` for alphabetic fields left
-composition uncommitted and one attempt invoked a menu shortcut. The final alphabetic
-journeys send each key with **explicit Shift and no Command**, finish composition,
-and verify exact editor values, search results and Git outcomes. Keyboard-source and
-clipboard settings were never changed. This is not proof of every IME/input method.
+Four lifecycle regressions verify active/queued cancellation, cancellation during final
+reconciliation, both write/read failures, and single-use ownership. These are distinct
+from merely cancelling an active Git process.
 
-The successful run still contains Apple's metadata-skipped and XCTest event-synthesis /
-priority-inversion warnings. No Swift compiler errors occurred. These diagnostics
-do not constitute application responsiveness measurements.
+## Observed brittleness and fixes
 
-## Measurements and unavailable coverage
+- Global literal pathspec mode interfered with stash cleanup. The pre-fix regression
+  left new.txt in the worktree after saving it; apply then correctly refused dirty state.
+  Controlled real-Git traces show stash invokes `git clean ... :/`: literal mode treats
+  that top-level magic as a filename. Literal mode is now scoped to caller file operands,
+  not exported to stash internals. No additional downstream clean/discard was added.
+- A root accessibility identifier hid the activity Done button from native automation.
+  Removed the unnecessary root override; native Done interaction now passes.
+- Sandboxed UI fixtures could not execute a generated shebang helper directly.
+  The owned test script is read by /bin/sh instead; no quarantine/security settings changed.
+- Earlier alphabetic bulk typeText/IME issues remain addressed by explicit Shift/no
+  Command key events and exact field/result checks—not proof of all input methods.
 
-One **warm/incremental development test run**, not a product benchmark:
-131.31 s elapsed, 12.05 s user and 9.58 s system CPU. BSD time reported maximum RSS **321.4 MiB**. That number is
-not simultaneous whole-process-family memory; LaunchServices/XCTest-controlled apps
-and services are not fully represented. No equivalent before/after product workflow
-was benchmarked, and no speedup is claimed.
+Successful logs retain Apple metadata-skipped and XCTest responsiveness/priority
+warnings. No Swift compiler error remains; warnings are not latency measurements.
 
-Not measured: large-repository UI latency, graph scrolling, complete family CPU/peak
-memory, cold builds, massive ref inventories or every cleanup phase. Not verified:
-long-distance split-scroll synchronization by automation, all double-click/copy/Finder
-paths, draft switching, all shortcuts/IME/multiline inputs, dark appearance screenshots,
-interactive signing/filters, crash recovery, arbitrary descendants, malicious repository
-configuration, every submodule/binary/merge case, older OS/Intel, or distribution.
-Frozen history can fail if external GC removes retained objects.
+## Measurements and limits
 
-## Retained artifacts
+One warm/incremental full test run: **297.51 s elapsed**, **29.20 s user + 20.73 s
+system CPU**, BSD time maximum RSS **348.7 MiB**. This is not complete process-family
+CPU/peak memory: XCTest/LaunchServices apps/services are not all represented. No
+equivalent before/after product benchmark or speedup is claimed.
 
-Ignored under `.artifacts/`:
+Unverified: live authenticated HTTPS/SSH/credential prompts, arbitrary remote/SSH helpers,
+push-upstream failure recovery on all custom mappings, external concurrent writers,
+all hooks/signing/filters, malicious config/symlink races, huge repos/ref/stash inventories,
+all descendant cleanup/crash scenarios, large split scrolling, all IME/multiline/shortcuts,
+folder picker entry, dark appearance/accessibility breadth, older OS/Intel or distribution.
 
-- `alignment-core-final.log`, `alignment-build.log`, `alignment-final.log`,
-  `alignment-summary.json`, earlier focused/failed runs and xcresult bundles.
-- `alignment-ref-regression-before.log`: observed pre-fix failure.
-- `alignment-graph.png`, `alignment-split.png`, `alignment-history.png`,
-  `alignment-clean.png`: explicit **window-only** previews.
-- `DerivedData/Build/Products/Debug/Forky.app`: runnable native prototype.
+Pull remains FF-only. Conflict editing/continue/abort, hunk staging, advanced history
+operations, branch/tag lifecycle and account management are not implemented. Frozen
+history can become unreadable if external GC removes retained objects. Stash drop's
+preflight is not atomic against other Git clients.
 
-Default XCTest failure diagnostics can contain desktop recordings; they stay ignored
-local artifacts, never project assets. Reference screenshots also stay ignored.
+## Local artifacts
 
-The existing base commit is `3537273`. No project commit was created by this iteration,
-no global tool/config installation was performed, and the REA worktree stayed unchanged.
+Ignored `.artifacts/` retains `workflows-core.log`, `workflows-build.log`,
+`workflows-final.log`, `workflows-summary.json`, focused/failed runs and bundles,
+`workflows-literal-boundary.log`, and window-only `workflows-remote.png`,
+`workflows-stash.png`, `workflows-activity.png`.
+
+Default XCTest failure diagnostics can contain desktop recordings; those remain local
+ignored artifacts, never bundled assets. Runnable app:
+`DerivedData/Build/Products/Debug/Forky.app` under `.artifacts/`.
+
+Previous alignment gate (42 tests): `.artifacts/Forky-20261016-214234.xcresult`.
+Current work builds on human-created base `a13008d`; no commit was created in this turn.

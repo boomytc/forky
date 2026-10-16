@@ -39,6 +39,15 @@ struct HistoryView: View {
                             if let commit = store.selectedCommit {
                                 Text(commit.shortOID).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                                 Text("\(store.commitFiles.count) \(store.commitFiles.count == 1 ? "file" : "files")").font(.system(size: 11)).foregroundStyle(.secondary)
+                                Menu {
+                                    Button("Create Branch Here…") { store.requestBranch(startingAt: commit.oid) }
+                                        .disabled(!store.canWrite)
+                                    Button("Copy Commit SHA") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(commit.oid, forType: .string)
+                                    }
+                                } label: { Image(systemName: "ellipsis.circle") }
+                                .menuStyle(.borderlessButton).fixedSize().accessibilityIdentifier("commitActions")
                             }
                         }.padding(.horizontal, 12).frame(height: 34)
                         Divider()

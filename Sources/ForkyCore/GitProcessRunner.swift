@@ -26,6 +26,11 @@ public struct GitProcessRunner: Sendable {
         self.outputLimit = outputLimit
     }
 
+    /// Retains this caller's executable and isolated environment, not the current ambient environment.
+    func withTimeout(_ timeout: TimeInterval) -> Self {
+        Self(executable: executable, environment: environment, timeout: timeout, outputLimit: outputLimit)
+    }
+
     public func run(_ arguments: [String], directory: URL? = nil) async throws -> GitProcessResult {
         try Task.checkCancellation()
         let invocation = ProcessInvocation(executable: executable, arguments: arguments,

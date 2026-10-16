@@ -44,14 +44,21 @@ struct BranchSheet: View {
     @State private var name = ""
     @FocusState private var nameFocused: Bool
     private var isCheckout: Bool { request.destination != nil }
-    private var dirty: Bool { !(store.snapshot?.changes.isEmpty ?? false) }
+    private var isRemote: Bool { request.destination?.kind == .remoteBranch }
+    private var dirty: Bool { !request.expected.changes.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label(isCheckout ? "Checkout Branch" : "Create Branch", systemImage: "arrow.triangle.branch")
+            Label(isRemote ? "Checkout Tracking Branch" : isCheckout ? "Checkout Branch" : "Create Branch", systemImage: "arrow.triangle.branch")
                 .font(.title3.weight(.semibold))
             if let destination = request.destination {
-                Text("Switch from \(store.snapshot?.branchLabel ?? "HEAD") to **\(destination.name)**.")
+                Text("Switch from \(request.expected.branchLabel) to **\(destination.name)**.")
+                if isRemote {
+                    TextField("New local branch name", text: $name).textFieldStyle(.roundedBorder)
+                        .focused($nameFocused).accessibilityIdentifier("branchName")
+                    Text("Create a new local branch tracking this remote branch. Existing local branches are never replaced.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Label(dirty ? "Commit or move aside your local changes first." : "Working tree is clean. No force or automatic stash will be used.",
                       systemImage: dirty ? "exclamationmark.triangle" : "checkmark.shield")
                     .font(.callout).foregroundStyle(dirty ? .orange : .secondary)
@@ -59,7 +66,7 @@ struct BranchSheet: View {
                 TextField("Branch name", text: $name)
                     .textFieldStyle(.roundedBorder).focused($nameFocused)
                     .accessibilityIdentifier("branchName")
-                Text("Create at \(request.head.prefix(8)). Your current branch and files will not change.")
+                Text("Create at \(request.startingOID.prefix(8)). Your current branch and files will not change.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Text("Git hooks and configured filters may run. Open only repositories you trust.")
@@ -68,16 +75,16 @@ struct BranchSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isCheckout ? "Checkout Branch" : "Create Branch") {
+                Button(isRemote ? "Create & Checkout" : isCheckout ? "Checkout Branch" : "Create Branch") {
                     store.performBranch(request, name: name)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!store.canWrite || (isCheckout ? dirty : name.isEmpty))
+                .disabled(!store.canWrite || (isCheckout && dirty) || ((!isCheckout || isRemote) && name.isEmpty))
                 .accessibilityIdentifier(isCheckout ? "checkoutBranchConfirm" : "createBranchConfirm")
             }
         }
         .padding(24).frame(width: 430)
-        .onAppear { nameFocused = !isCheckout }
+        .onAppear { name = request.suggestedName; nameFocused = !isCheckout || isRemote }
     }
 }
