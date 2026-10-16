@@ -59,18 +59,30 @@ public enum GitParsers {
         }
     }
 
-    public static func branches(_ data: Data) throws -> [GitBranch] {
-        try string(data).split(separator: "\n").map { line in
-            let fields = line.split(separator: "\0", omittingEmptySubsequences: false)
-            guard fields.count == 4, fields[3].isEmpty, isOID(String(fields[1])),
-                  fields[0].hasPrefix("refs/heads/") || fields[0].hasPrefix("refs/remotes/") else {
+    public static func references(_ data: Data) throws -> [GitReference] {
+        let result = try string(data).split(separator: "\n").map { line -> GitReference in
+            let fields = line.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 7, fields[6].isEmpty, isOID(fields[1]),
+                  ["*", " "].contains(fields[2]),
+                  ["commit", "tag", "tree", "blob"].contains(fields[4]),
+                  fields[3].isEmpty || isOID(fields[3]),
+                  ["", "commit", "tag", "tree", "blob"].contains(fields[5]),
+                  fields[3].isEmpty == fields[5].isEmpty else {
                 throw GitError.malformedOutput("Invalid ref record.")
             }
-            let ref = String(fields[0])
-            let remote = ref.hasPrefix("refs/remotes/")
-            return GitBranch(fullName: ref, name: String(ref.dropFirst(remote ? 13 : 11)),
-                             oid: String(fields[1]), isCurrent: fields[2] == "*", isRemote: remote)
+            let kind: GitReference.Kind
+            let prefix: String
+            if fields[0].hasPrefix("refs/heads/") { kind = .localBranch; prefix = "refs/heads/" }
+            else if fields[0].hasPrefix("refs/remotes/") { kind = .remoteBranch; prefix = "refs/remotes/" }
+            else if fields[0].hasPrefix("refs/tags/") { kind = .tag; prefix = "refs/tags/" }
+            else { throw GitError.malformedOutput("Unsupported ref namespace.") }
+            guard fields[0].count > prefix.count else { throw GitError.malformedOutput("Empty ref name.") }
+            let commitOID = fields[4] == "commit" ? fields[1] : (fields[5] == "commit" ? fields[3] : nil)
+            return GitReference(fullName: fields[0], name: String(fields[0].dropFirst(prefix.count)),
+                                objectOID: fields[1], commitOID: commitOID, kind: kind, isCurrent: fields[2] == "*")
         }
+        guard Set(result.map(\.id)).count == result.count else { throw GitError.malformedOutput("Duplicate refs.") }
+        return result
     }
 
     public static func commitFiles(_ data: Data) throws -> [CommitFile] {

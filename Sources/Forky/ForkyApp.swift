@@ -33,6 +33,10 @@ struct ForkyApp: App {
                 Button("Working Changes") { store.navigate(.changes) }.keyboardShortcut("1")
                 Button("All Commits") { store.navigate(.history) }.keyboardShortcut("2")
                 Divider()
+                Button("New Branch…") { store.requestBranch() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .disabled(!store.canWrite || store.snapshot?.head == nil)
+                Divider()
                 Button("Commit Staged Changes", action: store.commit)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!store.canCommit)

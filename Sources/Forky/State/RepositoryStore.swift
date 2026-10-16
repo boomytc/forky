@@ -4,8 +4,8 @@ import Observation
 import ForkyCore
 
 enum NavigationSection: Hashable {
-    case changes, history, branch(String)
-    var ref: String? { if case .branch(let value) = self { value } else { nil } }
+    case changes, history, reference(String)
+    var ref: String? { if case .reference(let value) = self { value } else { nil } }
 }
 
 struct ChangeSelection: Hashable {
@@ -19,6 +19,13 @@ struct AppNotice: Identifiable {
     let message: String
 }
 
+struct BranchRequest: Identifiable {
+    let id = UUID()
+    let root: URL
+    let head: String
+    let destination: GitReference?
+}
+
 @MainActor @Observable
 final class RepositoryStore {
     private(set) var repository: GitRepository?
@@ -30,6 +37,13 @@ final class RepositoryStore {
     private(set) var commits: [GitCommit] = []
     private(set) var commitFiles: [CommitFile] = []
     private(set) var hasMoreHistory = false
+    private(set) var graph = CommitGraph.empty
+    private(set) var decorations: [String: [GitReference]] = [:]
+    var historyQuery = ""
+    var referenceQuery = ""
+    var fileQuery = ""
+    var diffMode = DiffMode.unified
+    var branchRequest: BranchRequest?
     private(set) var diff = DiffDocument.empty
     private(set) var diffError: String?
     private(set) var historyError: String?
@@ -54,6 +68,8 @@ final class RepositoryStore {
     @ObservationIgnored private var historyTask: Task<Void, Never>?
     @ObservationIgnored private var mutationTask: Task<Void, Never>?
     @ObservationIgnored private var bootstrapped = false
+    @ObservationIgnored private var historyCursor: HistoryCursor?
+    @ObservationIgnored private var drafts: [String: String] = [:]
     @ObservationIgnored private let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
 
     init() {
@@ -113,13 +129,16 @@ final class RepositoryStore {
                 let snapshot = try await repository.snapshot()
                 try Task.checkCancellation()
                 guard sessionID == session else { return }
+                if let previous = self.repository { drafts[previous.root.path] = commitMessage }
                 self.repository = repository
                 self.snapshot = snapshot
                 snapshotIsCurrent = true
                 section = .changes
                 commits = []; commitFiles = []; selectedCommitID = nil; selectedCommitFileID = nil
                 selectedChange = nil; diff = .empty; diffError = nil; historyError = nil
-                commitMessage = ""
+                commitMessage = drafts[repository.root.path] ?? ""
+                historyQuery = ""; referenceQuery = ""; fileQuery = ""
+                graph = .empty; decorations = [:]; historyCursor = nil; hasMoreHistory = false
                 remember(repository.root)
                 isLoading = false
                 activity = "Ready"
@@ -177,14 +196,21 @@ final class RepositoryStore {
         loadChangeDiff()
     }
 
+    var visibleUnstaged: [FileChange] { (snapshot?.unstaged ?? []).filter(matchesFileFilter) }
+    var visibleStaged: [FileChange] { (snapshot?.staged ?? []).filter(matchesFileFilter) }
+    private func matchesFileFilter(_ change: FileChange) -> Bool {
+        fileQuery.isEmpty || change.path.value.localizedStandardContains(fileQuery)
+    }
+    func fileFilterChanged() { selectDefaultChange() }
+
     private func selectDefaultChange() {
         if let selectedChange,
-           let file = snapshot?.changes.first(where: { $0.id == selectedChange.path }),
+           let file = snapshot?.changes.first(where: { $0.id == selectedChange.path }), matchesFileFilter(file),
            selectedChange.side == .staged ? file.isStaged : file.isUnstaged {
             loadChangeDiff()
-        } else if let file = snapshot?.unstaged.first {
+        } else if let file = visibleUnstaged.first {
             selectChange(.init(path: file.id, side: .worktree))
-        } else if let file = snapshot?.staged.first {
+        } else if let file = visibleStaged.first {
             selectChange(.init(path: file.id, side: .staged))
         } else { selectChange(nil) }
     }
@@ -212,24 +238,39 @@ final class RepositoryStore {
         }
     }
 
-    func loadHistory(append: Bool = false) {
-        guard let repository, !isMutating else { return }
+    func loadHistory(append: Bool = false, debounce: Bool = false) {
+        guard let repository, !isMutating, section != .changes else { return }
+        if append && (isLoadingHistory || historyCursor == nil) { return }
         historyTask?.cancel(); historyID = UUID()
         let id = historyID, session = sessionID
-        let offset = append ? commits.count : 0
+        let cursor = append ? historyCursor : nil
+        let previousSelection = selectedCommitID
+        let previousCommits = append ? commits : []
         let ref = section.ref
+        let query = historyQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !append {
+            commits = []; graph = .empty; decorations = [:]; hasMoreHistory = false; historyCursor = nil
+            selectCommit(nil)
+        }
         isLoadingHistory = true; historyError = nil
         historyTask = Task {
             do {
-                let page = try await repository.history(ref: ref, offset: offset)
+                if debounce { try await Task.sleep(for: .milliseconds(280)) }
+                let page = try await repository.history(ref: ref, query: query, cursor: cursor)
+                let values = previousCommits + page.commits
+                let layout = await Task.detached { query.isEmpty ? CommitGraph(commits: values) : .empty }.value
                 try Task.checkCancellation()
                 guard historyID == id, sessionID == session else { return }
-                // External ref changes can reorder offset pages; suppress duplicate identities.
-                let existing = append ? Set(commits.map(\.id)) : []
-                commits = (append ? commits : []) + page.commits.filter { !existing.contains($0.id) }
+                commits = values; graph = layout
+                var refsByCommit: [String: [GitReference]] = [:]
+                for reference in page.references {
+                    if let oid = reference.commitOID { refsByCommit[oid, default: []].append(reference) }
+                }
+                decorations = refsByCommit
+                historyCursor = page.nextCursor
                 hasMoreHistory = page.hasMore; isLoadingHistory = false
                 if !append {
-                    let selected = commits.first { $0.id == selectedCommitID } ?? commits.first
+                    let selected = commits.first { $0.id == previousSelection } ?? commits.first
                     selectCommit(selected?.id)
                 }
             } catch is CancellationError {
@@ -292,6 +333,26 @@ final class RepositoryStore {
 
     func stage(_ change: FileChange) { mutate("Staging change…") { try await $0.stage(change) } }
     func unstage(_ change: FileChange) { mutate("Unstaging change…") { try await $0.unstage(change) } }
+    func stage(_ changes: [FileChange]) { mutate("Staging selected files…") { try await $0.stage(changes) } }
+    func unstage(_ changes: [FileChange]) { mutate("Unstaging selected files…") { try await $0.unstage(changes) } }
+
+    func requestBranch(_ destination: GitReference? = nil) {
+        guard canWrite, let repository, let head = snapshot?.head else { return }
+        if let destination, destination.kind != .localBranch || destination.isCurrent { return }
+        branchRequest = BranchRequest(root: repository.root, head: head, destination: destination)
+    }
+
+    func performBranch(_ request: BranchRequest, name: String) {
+        guard repository?.root == request.root else {
+            show(GitError.staleRepository, title: "Repository changed"); return
+        }
+        branchRequest = nil
+        if let destination = request.destination {
+            mutate("Switching to \(destination.name)…") { try await $0.checkout(destination, expectedHead: request.head) }
+        } else {
+            mutate("Creating branch…") { try await $0.createBranch(name: name, expectedHead: request.head) }
+        }
+    }
 
     func commit() {
         guard canCommit, let snapshot else { return }
@@ -308,20 +369,22 @@ final class RepositoryStore {
         isRefreshing = false; isLoadingDetail = false; isLoadingHistory = false
         isMutating = true; snapshotIsCurrent = false; activity = label
         mutationTask = Task {
-            var failure: (any Error)?
+            var failures: [String] = []
             do {
                 try await operation(repository)
                 if clearMessage { commitMessage = "" }
-            } catch { failure = error }
-            // A failure is not a rollback. Always reconcile the actual repository.
+            } catch { failures.append(error.localizedDescription) }
+            // A failure is not a rollback. Preserve BOTH write and reconciliation failures.
             do { snapshot = try await repository.snapshot(); snapshotIsCurrent = true }
             catch {
                 snapshotIsCurrent = false
-                if failure == nil { failure = error }
+                failures.append("Repository refresh also failed: " + error.localizedDescription)
             }
             isMutating = false
-            activity = failure == nil ? "Ready" : "Operation finished with an error"
-            if let failure { show(failure, title: "Git operation failed — review repository state") }
+            activity = failures.isEmpty ? "Ready" : "Operation finished with an error"
+            if !failures.isEmpty {
+                notice = AppNotice(title: "Git operation failed — review repository state", message: failures.joined(separator: "\n\n"))
+            }
             if section == .changes { selectDefaultChange() } else { loadHistory() }
         }
     }

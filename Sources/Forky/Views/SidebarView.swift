@@ -1,70 +1,115 @@
+import AppKit
 import SwiftUI
 import ForkyCore
 
 struct SidebarView: View {
-    let store: RepositoryStore
+    @Bindable var store: RepositoryStore
+    @State private var branchesExpanded = true
+    @State private var remotesExpanded = true
+    @State private var tagsExpanded = true
 
     private var selection: Binding<NavigationSection?> {
         Binding(get: { store.section }, set: { if let value = $0 { store.navigate(value) } })
     }
+    private func matches(_ ref: GitReference) -> Bool {
+        store.referenceQuery.isEmpty || ref.name.localizedStandardContains(store.referenceQuery)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ForkyMark(size: 30)
+            HStack(spacing: 9) {
+                ForkyMark(size: 25)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Forky").font(.headline)
-                    Text("YOUR GIT WORKSPACE").font(.system(size: 8, weight: .medium)).tracking(1.3).foregroundStyle(.secondary)
+                    Text(store.repository?.root.lastPathComponent ?? "Forky").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text(store.snapshot?.branchLabel ?? "").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Spacer()
-            }.padding(.horizontal, 16).padding(.vertical, 18)
-
-            List(selection: selection) {
-                Section("Workspace") {
-                    Label {
-                        HStack {
-                            Text("Changes")
-                            Spacer()
-                            Text("\(store.snapshot?.changes.count ?? 0)").foregroundStyle(.secondary).monospacedDigit()
-                        }
-                    } icon: { Image(systemName: "square.stack.3d.up") }
-                    .tag(NavigationSection.changes).accessibilityIdentifier("changesNavigation")
-                    Label("All Commits", systemImage: "clock.arrow.circlepath")
-                        .tag(NavigationSection.history).accessibilityIdentifier("historyNavigation")
-                }
-                if let snapshot = store.snapshot {
-                    Section("Local branches") {
-                        ForEach(snapshot.branches.filter { !$0.isRemote }) { branch in
-                            Label {
-                                HStack(spacing: 5) {
-                                    Text(branch.name).lineLimit(1)
-                                    if branch.isCurrent { Image(systemName: "checkmark").font(.caption).foregroundStyle(ForkyTheme.accent) }
-                                }
-                            } icon: { Image(systemName: "arrow.triangle.branch") }
-                            .tag(NavigationSection.branch(branch.fullName))
-                        }
-                        if snapshot.branches.allSatisfy(\.isRemote) {
-                            Text(snapshot.branch ?? "No branches yet").foregroundStyle(.secondary)
-                        }
+                Spacer(minLength: 0)
+                Menu {
+                    Button("Open Repository…", action: store.chooseRepository)
+                    ForEach(store.recentPaths, id: \.self) { path in
+                        Button(URL(fileURLWithPath: path).lastPathComponent) { store.open(URL(fileURLWithPath: path)) }
                     }
-                    if snapshot.branches.contains(where: \.isRemote) {
-                        Section("Remote branches") {
-                            ForEach(snapshot.branches.filter(\.isRemote)) { branch in
-                                Label(branch.name, systemImage: "network")
-                                    .tag(NavigationSection.branch(branch.fullName))
+                } label: { Image(systemName: "ellipsis.circle").foregroundStyle(.secondary) }
+                .menuStyle(.borderlessButton).fixedSize().help("Repositories")
+            }.padding(.horizontal, 13).padding(.vertical, 13)
+            Divider()
+            List(selection: selection) {
+                Label {
+                    HStack {
+                        Text("Changes")
+                        Spacer()
+                        Text("\(store.snapshot?.changes.count ?? 0)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                } icon: { Image(systemName: "doc.on.doc") }
+                .tag(NavigationSection.changes).accessibilityIdentifier("changesNavigation")
+                Label("All Commits", systemImage: "clock.arrow.circlepath")
+                    .tag(NavigationSection.history).accessibilityIdentifier("historyNavigation")
+                Section {
+                    FilterField(prompt: "Filter branches and tags", text: $store.referenceQuery, identifier: "referenceFilter")
+                        .listRowInsets(.init(top: 4, leading: 0, bottom: 7, trailing: 0))
+                    if let snapshot = store.snapshot {
+                        DisclosureGroup("Branches", isExpanded: $branchesExpanded) {
+                            ForEach(snapshot.branches.filter { !$0.isRemote && matches($0) }) { reference in
+                                referenceRow(reference)
                             }
+                            if snapshot.head == nil { Text("No commits yet").foregroundStyle(.secondary) }
+                        }
+                        DisclosureGroup("Remotes", isExpanded: $remotesExpanded) {
+                            ForEach(snapshot.branches.filter { $0.isRemote && matches($0) }) { reference in
+                                referenceRow(reference)
+                            }
+                            if snapshot.branches.allSatisfy({ !$0.isRemote }) { Text("No remote branches").foregroundStyle(.tertiary) }
+                        }
+                        DisclosureGroup("Tags", isExpanded: $tagsExpanded) {
+                            ForEach(snapshot.tags.filter(matches)) { reference in referenceRow(reference) }
+                            if snapshot.tags.isEmpty { Text("No tags").foregroundStyle(.tertiary) }
                         }
                     }
                 }
             }
-            .listStyle(.sidebar)
+            .font(.system(size: 12)).listStyle(.sidebar)
+            .environment(\.defaultMinListRowHeight, 25)
             .disabled(store.isMutating)
-            Spacer(minLength: 0)
-            HStack {
-                Image(systemName: "internaldrive").foregroundStyle(ForkyTheme.accent)
-                Text("Local first. No surprises.").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").foregroundStyle(ForkyTheme.accent)
+                Text(store.snapshot?.branchLabel ?? "HEAD").lineLimit(1).accessibilityIdentifier("currentBranch")
                 Spacer()
-            }.padding(16)
+                Button { store.requestBranch() } label: { Image(systemName: "plus") }
+                    .buttonStyle(.plain).help("Create a branch at HEAD")
+                    .disabled(!store.canWrite || store.snapshot?.head == nil)
+                    .accessibilityLabel("New Branch")
+            }
+            .font(.system(size: 11)).padding(12).background(.bar).overlay(alignment: .top) { Divider() }
+        }
+    }
+
+    private func referenceRow(_ reference: GitReference) -> some View {
+        Label {
+            HStack(spacing: 5) {
+                Text(reference.name).lineLimit(1).truncationMode(.middle)
+                if reference.isCurrent {
+                    Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(ForkyTheme.accent)
+                }
+            }
+        } icon: {
+            Image(systemName: reference.kind == .tag ? "tag" : (reference.isRemote ? "network" : "arrow.triangle.branch"))
+                .foregroundStyle(reference.isCurrent ? ForkyTheme.accent : .secondary)
+        }
+        .tag(NavigationSection.reference(reference.fullName))
+        .accessibilityIdentifier("ref:" + reference.fullName)
+        .help(reference.fullName + (reference.kind == .localBranch ? " · Double-click to request checkout" : ""))
+        .simultaneousGesture(TapGesture(count: 2).onEnded { store.requestBranch(reference) })
+        .contextMenu {
+            Button("Show History") { store.navigate(.reference(reference.fullName)) }
+            if reference.kind == .localBranch {
+                Button("Checkout Branch…") { store.requestBranch(reference) }
+                    .disabled(reference.isCurrent || !store.canWrite || store.snapshot?.head == nil)
+            }
+            Divider()
+            Button("Copy Reference Name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(reference.fullName, forType: .string)
+            }
         }
     }
 }

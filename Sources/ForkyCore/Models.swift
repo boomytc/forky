@@ -44,13 +44,17 @@ public struct FileChange: Identifiable, Hashable, Sendable {
     }
 }
 
-public struct GitBranch: Identifiable, Equatable, Sendable {
+/// Parsed once at the Git boundary. A tag's object identity is not its commit identity.
+public struct GitReference: Identifiable, Equatable, Sendable {
+    public enum Kind: String, Sendable { case localBranch, remoteBranch, tag }
     public let fullName: String
     public let name: String
-    public let oid: String
+    public let objectOID: String
+    public let commitOID: String?
+    public let kind: Kind
     public let isCurrent: Bool
-    public let isRemote: Bool
     public var id: String { fullName }
+    public var isRemote: Bool { kind == .remoteBranch }
 }
 
 public struct GitCommit: Identifiable, Equatable, Sendable {
@@ -78,18 +82,31 @@ public struct RepositorySnapshot: Sendable {
     public let head: String?
     public let branch: String?
     public let changes: [FileChange]
-    public let branches: [GitBranch]
+    public let references: [GitReference]
     public let indexFingerprint: String
     public let operationInProgress: Bool
+    public var branches: [GitReference] { references.filter { $0.kind != .tag } }
+    public var tags: [GitReference] { references.filter { $0.kind == .tag } }
     public var staged: [FileChange] { changes.filter(\.isStaged) }
     public var unstaged: [FileChange] { changes.filter(\.isUnstaged) }
     public var hasConflicts: Bool { changes.contains(where: \.isConflict) }
     public var branchLabel: String { branch ?? (head.map { "Detached · \($0.prefix(8))" } ?? "Unborn HEAD") }
 }
 
+/// Only the repository constructs a cursor. Root OIDs and query are immutable across pages.
+public struct HistoryCursor: Sendable {
+    let revisions: [String]
+    let offset: Int
+    let query: String
+    let ref: String?
+    let references: [GitReference]
+}
+
 public struct HistoryPage: Sendable {
     public let commits: [GitCommit]
-    public let hasMore: Bool
+    public let nextCursor: HistoryCursor?
+    public let references: [GitReference]
+    public var hasMore: Bool { nextCursor != nil }
 }
 
 public enum DiffSide: String, Hashable, Sendable { case worktree, staged }

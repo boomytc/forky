@@ -30,23 +30,43 @@ public struct GitRepository: Sendable {
         try await gate.withPermit { try await readSnapshot() }
     }
 
-    public func history(ref: String? = nil, offset: Int = 0) async throws -> HistoryPage {
+    public func history(ref: String? = nil, query: String = "", cursor: HistoryCursor? = nil) async throws -> HistoryPage {
         try await gate.withPermit {
-            guard offset >= 0 else { throw GitError.malformedOutput("Negative history offset.") }
-            // --all also permits a newly initialized repository with no HEAD.
-            var args = ["log", "--date-order", "--max-count=\(Self.historyPageSize + 1)",
-                        "--skip=\(offset)", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b", "-z"]
-            if let ref {
-                guard ref.hasPrefix("refs/heads/") || ref.hasPrefix("refs/remotes/") else {
-                    throw GitError.malformedOutput("History requires a full branch ref.")
+            let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.utf8.contains(0), query.utf8.count <= 4096 else {
+                throw GitError.malformedOutput("History query is too large or contains NUL.")
+            }
+            let roots: [String], references: [GitReference], offset: Int
+            if let cursor {
+                guard cursor.ref == ref, cursor.query == query else {
+                    throw GitError.malformedOutput("History cursor belongs to another query.")
                 }
-                args += [ref]
-            } else { args += ["--all"] }
-            args += ["--"]
-            let result = try await command(args)
-            let commits = try GitParsers.commits(result.stdout)
-            return HistoryPage(commits: Array(commits.prefix(Self.historyPageSize)),
-                               hasMore: commits.count > Self.historyPageSize)
+                roots = cursor.revisions; references = cursor.references; offset = cursor.offset
+            } else {
+                references = try await readReferences()
+                offset = 0
+                if let ref {
+                    guard let selected = references.first(where: { $0.fullName == ref }) else { throw GitError.staleRepository }
+                    // Resolve the observed object, never reread a mutable name after capturing its facts.
+                    let resolved = try await command(["rev-parse", "--verify", selected.objectOID + "^{commit}"])
+                    let oid = try GitParsers.string(resolved.stdout).trimmingCharacters(in: .newlines)
+                    guard GitParsers.isOID(oid) else { throw GitError.malformedOutput("Invalid history root.") }
+                    roots = [oid]
+                } else {
+                    let head = try await headOID()
+                    roots = Array(Set(references.map(\.objectOID) + (head.map { [$0] } ?? []))).sorted()
+                }
+            }
+            guard !roots.isEmpty else { return HistoryPage(commits: [], nextCursor: nil, references: references) }
+            var args = ["log", "--topo-order", "--max-count=\(Self.historyPageSize + 1)",
+                        "--skip=\(offset)", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b", "-z"]
+            if !query.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--grep=" + query] }
+            let output = try await command(args + roots + ["--"])
+            let commits = try GitParsers.commits(output.stdout)
+            let page = Array(commits.prefix(Self.historyPageSize))
+            let next = commits.count > Self.historyPageSize
+                ? HistoryCursor(revisions: roots, offset: offset + page.count, query: query, ref: ref, references: references) : nil
+            return HistoryPage(commits: page, nextCursor: next, references: references)
         }
     }
 
@@ -89,21 +109,53 @@ public struct GitRepository: Sendable {
         }
     }
 
-    public func stage(_ change: FileChange) async throws {
+    public func stage(_ change: FileChange) async throws { try await stage([change]) }
+
+    public func stage(_ changes: [FileChange]) async throws {
+        guard !changes.isEmpty else { return }
         try await gate.withPermit {
-            _ = try await command(["add", "--"] + change.stagePaths)
+            let paths = Array(Set(changes.flatMap(\.stagePaths))).sorted()
+            _ = try await command(["add", "--"] + paths, write: true)
         }
     }
 
-    public func unstage(_ change: FileChange) async throws {
+    public func unstage(_ change: FileChange) async throws { try await unstage([change]) }
+
+    public func unstage(_ changes: [FileChange]) async throws {
+        guard !changes.isEmpty else { return }
         try await gate.withPermit {
-            let head = try await headOID()
-            if head == nil {
-                // Remove from the index only. Never delete the worktree file.
-                _ = try await command(["rm", "--cached", "--ignore-unmatch", "--"] + change.unstagePaths)
+            let paths = Array(Set(changes.flatMap(\.unstagePaths))).sorted()
+            if try await headOID() == nil {
+                _ = try await command(["rm", "--cached", "--ignore-unmatch", "--"] + paths, write: true)
             } else {
-                _ = try await command(["restore", "--staged", "--"] + change.unstagePaths)
+                _ = try await command(["restore", "--staged", "--"] + paths, write: true)
             }
+        }
+    }
+
+    public func createBranch(name: String, expectedHead: String) async throws {
+        guard !name.isEmpty, !name.hasPrefix("-"), !name.utf8.contains(0) else { throw GitError.invalidBranchName }
+        try await gate.withPermit {
+            let fresh = try await readSnapshot()
+            guard !fresh.operationInProgress else { throw GitError.operationInProgress }
+            guard fresh.head == expectedHead, GitParsers.isOID(expectedHead) else { throw GitError.staleRepository }
+            // Validate the literal ref, not --branch's @{-1} shorthand expansion.
+            _ = try await command(["check-ref-format", "refs/heads/" + name])
+            _ = try await command(["branch", "--", name, expectedHead], write: true)
+        }
+    }
+
+    public func checkout(_ branch: GitReference, expectedHead: String) async throws {
+        try await gate.withPermit {
+            let fresh = try await readSnapshot()
+            guard !fresh.operationInProgress else { throw GitError.operationInProgress }
+            guard fresh.head == expectedHead, branch.kind == .localBranch,
+                  let destination = fresh.branches.first(where: { $0.id == branch.id }),
+                  destination.objectOID == branch.objectOID else { throw GitError.staleRepository }
+            guard fresh.changes.isEmpty else { throw GitError.dirtyWorktree }
+            // Never discard, overwrite ignored files, recurse into submodules or override worktree ownership.
+            _ = try await command(["switch", "--no-guess", "--no-overwrite-ignore",
+                                   "--no-recurse-submodules", "--", destination.name], write: true)
         }
     }
 
@@ -138,6 +190,13 @@ public struct GitRepository: Sendable {
         return output
     }
 
+    private func readReferences() async throws -> [GitReference] {
+        let output = try await command(["for-each-ref",
+            "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(*objectname)%00%(objecttype)%00%(*objecttype)%00",
+            "refs/heads/", "refs/remotes/", "refs/tags/"])
+        return try GitParsers.references(output.stdout)
+    }
+
     private func headOID() async throws -> String? {
         let output = try await command(["rev-parse", "--verify", "--quiet", "HEAD"], accepted: [0, 1])
         guard output.status == 0 else { return nil }
@@ -152,8 +211,7 @@ public struct GitRepository: Sendable {
         let head = try await headOID()
         let symbolic = try await command(["symbolic-ref", "--quiet", "--short", "HEAD"], accepted: [0, 1])
         let branch = symbolic.status == 0 ? try GitParsers.string(symbolic.stdout).trimmingCharacters(in: .newlines) : nil
-        let refs = try await command(["for-each-ref", "--format=%(refname)%00%(objectname)%00%(HEAD)%00",
-                                      "refs/heads/", "refs/remotes/"])
+        let references = try await readReferences()
         let rawIndex = try await command(["diff", "--cached", "--no-ext-diff", "--no-textconv",
                                           "--raw", "--full-index", "--no-abbrev", "--no-renames", "-z"])
         var fingerprintBytes = Data((head ?? "unborn").utf8)
@@ -167,7 +225,7 @@ public struct GitRepository: Sendable {
         let inProgress = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"]
             .contains { FileManager.default.fileExists(atPath: gitDirectory.appendingPathComponent($0).path) }
         return RepositorySnapshot(root: root, head: head, branch: branch, changes: changes,
-                                  branches: try GitParsers.branches(refs.stdout), indexFingerprint: fingerprint,
+                                  references: references, indexFingerprint: fingerprint,
                                   operationInProgress: inProgress)
     }
 }

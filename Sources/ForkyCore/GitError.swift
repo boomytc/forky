@@ -14,6 +14,9 @@ public enum GitError: Error, LocalizedError, Sendable {
     case operationInProgress
     case staleIndex
     case invalidMessage
+    case dirtyWorktree
+    case staleRepository
+    case invalidBranchName
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +33,9 @@ public enum GitError: Error, LocalizedError, Sendable {
         case .operationInProgress: "A merge, rebase, cherry-pick or revert is in progress. Complete it in another Git client first."
         case .staleIndex: "The staged changes or HEAD changed since the last refresh. Review the updated changes before committing."
         case .invalidMessage: "Enter a nonempty commit message of at most 64 KiB, without NUL characters."
+        case .dirtyWorktree: "Commit or move aside all staged, unstaged and untracked changes before switching branches. Forky will not discard or stash them automatically."
+        case .staleRepository: "HEAD or the selected branch changed. Refresh and review the destination before retrying."
+        case .invalidBranchName: "Enter a valid branch name, without a leading dash or NUL characters."
         }
     }
 }

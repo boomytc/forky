@@ -30,25 +30,38 @@ open .artifacts/DerivedData/Build/Products/Debug/Forky.app --args --repository /
 No installation into /Applications, global tool changes, or REA MCP registration is required.
 The app invokes `/usr/bin/git`; Xcode / Command Line Tools must already be available.
 
-## First version
+## Current workflows
 
-- Open an existing worktree or a subdirectory; recent repositories.
-- Local / remote branch inventory; branch selection filters history, **not checkout**.
-- Paged history (200 commits per page), commit files, root and first-parent merge diffs.
-- Unstaged / staged changes and unified, line-numbered text diffs.
-- Explicit per-file staging and unstaging, including new repositories and renames.
-- Commit **only explicitly staged files**, with stale-index / conflict / ongoing-operation checks.
-- ⌘O open, ⌘R refresh, ⌘1 changes, ⌘2 history, ⌘↩ commit.
-- Native light/dark appearance and original generated icon.
+- Open an existing worktree/subdirectory and switch between recent repositories.
+- Collapsible branch/remote/tag sidebar with a live name filter.
+- Connected, topological commit graph with local/remote/annotated-tag badges.
+- Frozen-root history paging (200 commits per page) and literal, case-insensitive
+  **commit-message** search across the selected history, not just loaded rows.
+- Commit summary: full SHA, parents, author/email, date, full body and references;
+  changes use root or first-parent merge diffs.
+- Compact changed-file list, file filtering, unified or synchronized side-by-side
+  line-numbered diff, and Finder/copy-path context actions.
+- Per-file stage/unstage by button, context menu or double-click. Stage All / Unstage
+  All require confirmation; with a filter, **only visible listed files** are affected.
+- Commit **only explicitly staged files**, with stale-index/conflict/operation checks,
+  soft summary-length guidance and in-memory drafts when switching repositories.
+- Create a branch at the reviewed HEAD **without switching**. Checkout is a separate,
+  confirmed local-branch action, requiring a clean worktree and unchanged destination.
+  Single-clicking a branch/tag only filters history; double-clicking a local branch
+  requests checkout confirmation.
+- ⌘O open, ⌘R refresh, ⌘1 changes, ⌘2 history, ⇧⌘N new branch, ⌘↩ commit.
+- Native appearance, resizable panes and original Forky artwork.
 
-Not yet implemented: connected commit graph lanes, line/hunk staging, branch checkout,
-fetch/pull/push, conflict editor, clone/init UI, stash UI, automatic filesystem watching,
-AI integration, configurable Git executable or distribution/notarization.
+Not yet implemented: hunk/line staging, branch/tag deletion, fetch/pull/push, stash UI,
+merge/rebase/cherry-pick/revert UI, conflict editor, blame/file tree, clone/init UI,
+automatic filesystem watching, AI, configurable Git executable or notarization.
+
+See [the alignment notes](docs/ALIGNMENT.md) for reference sources and remaining gaps.
 
 ## Safety and limits
 
-Only open repositories you trust. Git can invoke configured clean filters, signing tools,
-and commit hooks. Forky disables external diff/textconv and fsmonitor commands for its
+Only open repositories you trust. Git can invoke configured clean/smudge filters, signing
+tools, commit hooks and checkout hooks. Forky disables external diff/textconv and fsmonitor commands for its
 queries, but it is **not a sandbox for malicious Git configuration**.
 
 Commands use argv arrays, literal pathspecs and NUL-framed output, not a shell.
@@ -69,7 +82,8 @@ incomplete-output error. A failed or interrupted write may have already changed 
 inspect/refresh before retrying. Non-UTF-8 paths are rejected rather than rewritten.
 
 There are no automatic remote operations, force operations, discard/reset/clean actions,
-or hidden stage-all. Commit messages and recent repository paths are local UI state;
+or hidden stage-all/checkout. Checkout refuses dirty worktrees, refuses overwriting ignored
+files, does not recurse into submodules, and respects other worktrees' branch ownership. Commit messages and recent repository paths are local UI state;
 the application does not send them to a service.
 
 ## Tests
@@ -90,7 +104,8 @@ See [docs/VALIDATION.md](docs/VALIDATION.md) for checks actually executed and li
 - `Sources/ForkyCore/`: typed Git boundary, parsers, process ownership and operations.
 - `Sources/Forky/`: @MainActor observable state, SwiftUI shell, AppKit history / diff.
 - `Tests/ForkyCoreTests/`: real-Git and boundary regressions.
-- `Tests/ForkyUITests/`: native stage/unstage/commit and history workflows.
+- `Tests/ForkyUITests/`: native commit/history, graph/search/split-diff, alphabetic input,
+  filtered batch staging and create/checkout workflows.
 - `scripts/generate-project.py`: regenerate stable native Xcode project (Python stdlib).
 - `scripts/generate-icon.swift`: regenerate the original icon with AppKit.
 

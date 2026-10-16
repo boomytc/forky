@@ -1,7 +1,8 @@
 import SwiftUI
 
 enum ForkyTheme {
-    static let accent = Color(red: 0.12, green: 0.60, blue: 0.43)
+    static let accent = Color(nsColor: .controlAccentColor)
+    static let brand = Color(red: 0.12, green: 0.60, blue: 0.43)
     static let panel = Color(nsColor: .controlBackgroundColor)
     static let subtle = Color(nsColor: .quaternaryLabelColor)
 }
@@ -13,7 +14,7 @@ struct ForkyMark: View {
             .font(.system(size: size * 0.46, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
-            .background(ForkyTheme.accent.gradient, in: .rect(cornerRadius: size * 0.25))
+            .background(ForkyTheme.brand.gradient, in: .rect(cornerRadius: size * 0.25))
             .accessibilityLabel("Forky")
     }
 }

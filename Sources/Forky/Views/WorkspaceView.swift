@@ -10,7 +10,7 @@ struct WorkspaceView: View {
             if store.repository != nil {
                 NavigationSplitView {
                     SidebarView(store: store)
-                        .navigationSplitViewColumnWidth(min: 195, ideal: 225, max: 310)
+                        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 300)
                 } detail: {
                     VStack(spacing: 0) {
                         if !store.snapshotIsCurrent && !store.isBusy {
@@ -20,7 +20,7 @@ struct WorkspaceView: View {
                         if store.section == .changes { ChangesView(store: store) }
                         else { HistoryView(store: store) }
                         StatusBar(store: store)
-                    }
+                    }.id(store.repository?.root)
                 }
             } else {
                 WelcomeView(store: store)
@@ -34,6 +34,16 @@ struct WorkspaceView: View {
                     .labelStyle(.iconOnly).help("Open repository · ⌘O").disabled(store.isMutating)
                     .accessibilityIdentifier("openRepository")
             }
+            ToolbarItem(placement: .automatic) {
+                Button("New Branch", systemImage: "arrow.triangle.branch") { store.requestBranch() }
+                    .labelStyle(.titleAndIcon).help("Create branch at HEAD · ⇧⌘N")
+                    .disabled(!store.canWrite || store.snapshot?.head == nil).accessibilityIdentifier("newBranch")
+            }
+            ToolbarItem(placement: .automatic) {
+                Button("Show in Finder", systemImage: "folder") {
+                    if let root = store.repository?.root { NSWorkspace.shared.activateFileViewerSelecting([root]) }
+                }.help("Reveal repository in Finder").disabled(store.repository == nil)
+            }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {
                     if store.isBusy { ProgressView().controlSize(.small) }
@@ -44,6 +54,7 @@ struct WorkspaceView: View {
                 }
             }
         }
+        .sheet(item: $store.branchRequest) { request in BranchSheet(request: request, store: store) }
         .alert(store.notice?.title ?? "Git Error", isPresented: Binding(
             get: { store.notice != nil }, set: { if !$0 { store.notice = nil } }
         )) {
@@ -117,7 +128,7 @@ private struct StatusBar: View {
             }
         }
         .font(.system(size: 11)).foregroundStyle(.secondary)
-        .padding(.horizontal, 14).frame(height: 29)
+        .padding(.horizontal, 12).frame(height: 24)
         .background(.bar).overlay(alignment: .top) { Divider() }
     }
 }
