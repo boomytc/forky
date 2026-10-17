@@ -36,9 +36,10 @@ struct ImageComparisonSheet: View {
     @State private var busy = false
     @State private var captured = false
     @State private var captureScope = ""
+    @State private var lfsNote: String?
     @State private var token = UUID()
     var body: some View {
-        AdvancedFrame(title: "Image Comparison", subtitle: "Captured local bytes · first frame · thumbnails ≤2048 px · no LFS hydration or checkout") {
+        AdvancedFrame(title: "Image Comparison", subtitle: "Captured local bytes · first frame · thumbnails ≤2048 px · local LFS objects only") {
             VStack(spacing: 10) {
                 HStack {
                     TextField("Relative image path", text: $path)
@@ -68,7 +69,10 @@ struct ImageComparisonSheet: View {
                         }
                     }
                 }
-                if captured { Text("Captured: " + captureScope).font(.caption2).textSelection(.enabled).accessibilityIdentifier("imageCaptureComplete") }
+                if captured {
+                    Text("Captured: " + captureScope).font(.caption2).textSelection(.enabled).accessibilityIdentifier("imageCaptureComplete")
+                    if let lfsNote { Text(lfsNote).font(.caption2).foregroundStyle(.orange).accessibilityIdentifier("imageLFSNote") }
+                }
             }.padding(14)
         } actions: {
             Button("Close") { store.sheet = nil }.keyboardShortcut(.cancelAction)
@@ -78,11 +82,18 @@ struct ImageComparisonSheet: View {
         .task { path = request.path?.value ?? ""; from = request.expected.head ?? ""; to = request.commitOID ?? ""; token = UUID() }
         .task(id: token) {
             guard !path.isEmpty, !from.isEmpty else { return }
-            busy = true; failure = nil
+            busy = true; failure = nil; lfsNote = nil
             do {
-                let pair = try await request.repository.imageComparison(from: from, to: worktree ? nil : to, path: GitPath(path))
-                let decoded = try await Task.detached { (try ImageThumbnail.make(pair.before), try ImageThumbnail.make(pair.after)) }.value
-                try Task.checkCancellation(); before = decoded.0; after = decoded.1; busy = false; captured = true
+                let repository = request.repository
+                let pair = try await repository.imageComparison(from: from, to: worktree ? nil : to, path: GitPath(path))
+                // Pointer resolution and decode run off the main actor; no network is attempted.
+                let decoded = try await Task.detached { () -> (CGImage?, CGImage?, String?) in
+                    let before = repository.resolveLFSImage(pair.before)
+                    let after = repository.resolveLFSImage(pair.after)
+                    return (try ImageThumbnail.make(before.bytes), try ImageThumbnail.make(after.bytes), before.note ?? after.note)
+                }.value
+                try Task.checkCancellation(); before = decoded.0; after = decoded.1; lfsNote = decoded.2
+                busy = false; captured = true
                 captureScope = from + " → " + (worktree ? "working file" : to) + " · " + path
             } catch is CancellationError {} catch { busy = false; failure = error.localizedDescription }
         }

@@ -23,6 +23,9 @@ struct ExtendedManagementSheet: View {
     @State private var worktrees: [GitWorktree] = []
     @State private var settings: [GitSetting] = []
     @State private var patch: PatchImport?
+    @State private var submodules: [SubmoduleStatus] = []
+    @State private var submodulesOmitted = 0
+    @State private var locks: [LFSLock] = []
     @State private var output = ""
     @State private var failure: String?
     @State private var busy = false
@@ -106,6 +109,7 @@ struct ExtendedManagementSheet: View {
         .onChange(of: value) { _, _ in patch = nil }
         .onChange(of: action) { _, _ in
             patch = nil; failure = nil; approved = false
+            submodules = []; submodulesOmitted = 0; locks = []
             if tool == .settings {
                 if action == "Use Git Executable" { value = store.gitExecutablePath; second = store.explicitHelperPATH }
                 else { let local = settings.first { $0.key == setting }?.local; value = local ?? ""; inherit = local == nil }
@@ -198,6 +202,31 @@ struct ExtendedManagementSheet: View {
         case .submodules:
             textField("Repository-relative submodule path", text: $value)
             Button("Open Verified Submodule") { openRequested = true; openID = UUID() }.disabled(value.isEmpty || busy)
+            if action == "Status", !submodules.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Index gitlinks (\(submodules.count))").font(.caption).foregroundStyle(.secondary)
+                    ForEach(submodules) { submodule in
+                        HStack(spacing: 8) {
+                            Text(submodule.path.value).font(.system(.caption, design: .monospaced)).lineLimit(1)
+                            Text(submodule.state.rawValue).font(.caption2)
+                                .foregroundStyle(submodule.state == .upToDate ? Color.secondary : Color.orange)
+                            if let ahead = submodule.ahead, let behind = submodule.behind {
+                                Text("ahead \(ahead) · behind \(behind)").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Update…") { value = submodule.path.value; action = "Update" }
+                                .accessibilityIdentifier("submoduleUpdate:\(submodule.path.value)")
+                            Button("Open") { value = submodule.path.value; openRequested = true; openID = UUID() }
+                                .disabled(submodule.checkedOutOID == nil)
+                        }
+                    }
+                    if submodulesOmitted > 0 {
+                        Text("\(submodulesOmitted) more gitlinks were listed without recursive inspection.").font(.caption2).foregroundStyle(.orange)
+                    }
+                    Text("Ahead/behind uses each initialized submodule's own HEAD. Working-tree dirtiness inside a submodule is not checked.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
             if action != "Status" {
                 if action == "Add" { textField("Source URL / absolute local source", text: $second) }
                 Text("Network may occur. Add stages .gitmodules/gitlink by native Git. Update uses no force/recursive/remote flag; dirty submodules may refuse.")
@@ -205,6 +234,20 @@ struct ExtendedManagementSheet: View {
         case .lfs:
             if ["Track", "Lock", "Unlock"].contains(action) { textField("Repository-relative filename", text: $value) }
             if ["Fetch", "Pull"].contains(action) { remotePicker }
+            if !locks.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Locks on the configured server (\(locks.count))").font(.caption).foregroundStyle(.secondary)
+                    ForEach(locks) { lock in
+                        HStack(spacing: 8) {
+                            Text(lock.path).font(.system(.caption, design: .monospaced)).lineLimit(1)
+                            if let owner = lock.owner { Text(owner).font(.caption2).foregroundStyle(.secondary) }
+                            Spacer()
+                            Button("Unlock…") { value = lock.path; action = "Unlock" }
+                                .accessibilityIdentifier("lfsUnlock:\(lock.path)")
+                        }
+                    }
+                }
+            }
             Text("Bring your own git-lfs on PATH. Locks/Fetch/Pull/Lock/Unlock may contact the configured server. Track edits .gitattributes but does not stage it. Nothing is installed.")
         case .gitflow:
             if GitflowTask(rawValue: action)?.requiresName == true { textField("Feature / release / hotfix name", text: $value) }
@@ -264,10 +307,18 @@ struct ExtendedManagementSheet: View {
                 if action != "Review Text Patch" || value.isEmpty { busy = false; return }
                 let review = try await request.repository.reviewPatch(at: (try LocalFilePath.absolute(value)), expected: request.expected)
                 try Task.checkCancellation(); patch = review; text = review.preview
-            case .submodules: text = try await request.repository.submoduleStatus()
+            case .submodules:
+                if action == "Status" {
+                    let report = try await request.repository.submoduleStatuses()
+                    submodules = report.entries; submodulesOmitted = report.omitted
+                    text = report.entries.map {
+                        $0.path.value + " · " + $0.state.rawValue
+                            + ($0.ahead.map { " · ahead \($0)" } ?? "") + ($0.behind.map { " · behind \($0)" } ?? "")
+                    }.joined(separator: "\n")
+                } else { submodules = []; submodulesOmitted = 0; text = "Review the exact path and action before Apply." }
             case .lfs:
                 if action == "Status" { text = try await request.repository.lfs(.status, expected: request.expected) }
-                else if action == "Locks" { failure = "Locks is a network action: approve and use Apply to query."; busy = false; return }
+                else if action == "Locks" { text = "Locks queries the configured server and shows the list below after approval." }
                 else { text = "Review the specific LFS action and scope before Apply." }
             case .gitflow:
                 if action == "Version" { text = try await request.repository.gitflow(.version, name: "", expected: request.expected) }
@@ -336,6 +387,21 @@ struct ExtendedManagementSheet: View {
                 if action == "Add" { run("Adding submodule (network)") { repo in try await repo.addSubmodule(url: second, path: path, expected: expected); return "Inspect .gitmodules and staged gitlink." } }
                 else { run("Updating submodule (network)") { repo in try await repo.updateSubmodule(path, expected: expected); return "Submodule update completed." } }
             case .lfs:
+                if action == "Locks" {
+                    // A network read, not a local mutation: keep the sheet so the structured list stays visible.
+                    Task { @MainActor in
+                        busy = true; failure = nil
+                        do {
+                            let values = try await request.repository.lfsLocks(expected: expected)
+                            try Task.checkCancellation()
+                            locks = values
+                            output = values.isEmpty ? "No locks on the configured server." : "Fetched \(values.count) lock records."
+                            approved = false; busy = false
+                        } catch is CancellationError { busy = false }
+                        catch { failure = error.localizedDescription; busy = false }
+                    }
+                    return
+                }
                 let task: LFSTask
                 switch action {
                 case "Locks": task = .locks

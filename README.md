@@ -33,7 +33,8 @@ Tools → Git Settings can select another executable and explicit helper PATH.
   search, SHA navigation, date/first-parent filters and selectable merge-parent diffs.
 - Embedded tree/blob/blame, rename-following file history, back navigation, two-revision
   or working comparisons, reflog recovery and separately approved reset modes.
-- Unified/split diff, context/whitespace/wrap/hunk controls; image side/swipe/onion comparison.
+- Unified/split diff, context/whitespace/wrap/hunk controls; image side/swipe/onion comparison
+  with local LFS object resolution (pointer without a local object is reported, never fetched).
 - Three-stage conflict editor with per-file chunk progress, previous/next unresolved
   navigation, bulk one-side choices, explicit save/stage and configured mergetool.
   There is no synchronized three-pane scrolling.
@@ -45,7 +46,8 @@ Tools → Git Settings can select another executable and explicit helper PATH.
 - Stash save/preview/apply/drop, selected-file save, rename and success-then-drop pop.
 - Worktree management, frozen text-patch import/check/apply and non-overwriting export.
 - Local/inherited Git settings and original config backups; existing identity/signing/helpers.
-- Submodule status/add/open/update; bring-your-own LFS status/tracking/network/locks.
+- Submodule status with structured gitlink rows, ahead/behind and per-row update/open;
+  bring-your-own LFS status/tracking/network/locks with a structured lock list.
 - Local overview/statistics, manual bisect, bring-your-own Gitflow and explicit trusted
   executable/JSON-argv tools, including optional AI draft generation.
 
