@@ -8,6 +8,11 @@ public struct ConflictChunk: Identifiable, Sendable {
     public let theirs: String
     public let base: String?
 }
+public struct ConflictProgress: Equatable, Sendable {
+    public let resolved: Int
+    public let total: Int
+    public var unresolved: Int { total - resolved }
+}
 public struct ConflictDocument: Sendable {
     private enum Part: Sendable { case text(String), chunk(ConflictChunk) }
     private let parts: [Part]
@@ -70,5 +75,32 @@ public struct ConflictDocument: Sendable {
                 }
             }
         }.joined()
+    }
+
+    /// Counts only chunks that belong to this document; unrelated keys are ignored.
+    public func progress(_ choices: [Int: ConflictChoice]) -> ConflictProgress {
+        let resolved = chunks.reduce(0) { total, chunk in
+            (choices[chunk.id] ?? .unresolved) == .unresolved ? total : total + 1
+        }
+        return ConflictProgress(resolved: resolved, total: chunks.count)
+    }
+
+    /// The next unresolved chunk strictly after `id`, or the first one when `id` is nil.
+    public func nextUnresolvedID(after id: Int?, choices: [Int: ConflictChoice]) -> Int? {
+        chunks.first { chunk in
+            (id.map { chunk.id > $0 } ?? true) && (choices[chunk.id] ?? .unresolved) == .unresolved
+        }?.id
+    }
+
+    /// The previous unresolved chunk strictly before `id`, or the last one when `id` is nil.
+    public func previousUnresolvedID(before id: Int?, choices: [Int: ConflictChoice]) -> Int? {
+        chunks.last { chunk in
+            (id.map { chunk.id < $0 } ?? true) && (choices[chunk.id] ?? .unresolved) == .unresolved
+        }?.id
+    }
+
+    /// Bulk selection for one side; the caller still reviews the rendered result before saving.
+    public func choices(_ choice: ConflictChoice) -> [Int: ConflictChoice] {
+        Dictionary(uniqueKeysWithValues: chunks.map { ($0.id, choice) })
     }
 }

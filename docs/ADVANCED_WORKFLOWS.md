@@ -38,6 +38,12 @@ explicitly writes/stages that one path. Use Ours/Theirs replaces the editor resu
 not Git state until confirmation. A missing stage means a deleted/absent side;
 **Resolve by deleting this file** is explicit, separate from saving text.
 
+**Conflict chunks** shows how many chunks are resolved and which one is current.
+**Previous/Next Unresolved** jumps between remaining chunks; **All Ours / All Theirs**
+shows a confirmation and changes chunk choices only. The editor changes when you press
+Replace Editor with These Chunk Choices; nothing is staged until Save & Stage.
+The sheet does not implement synchronized three-pane scrolling.
+
 Marker lines block staging unless the user approves literal marker content. There
 is no automatic merge correctness claim. Failed-save drafts are retained in session
 (up to 16 MiB shared with failed reword drafts); reopening identifies restored drafts,

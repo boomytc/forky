@@ -32,7 +32,9 @@ Tools → Git Settings can select another executable and explicit helper PATH.
 - Embedded tree/blob/blame, rename-following file history, back navigation, two-revision
   or working comparisons, reflog recovery and separately approved reset modes.
 - Unified/split diff, context/whitespace/wrap/hunk controls; image side/swipe/onion comparison.
-- Three-stage conflict editor, chunk choices, explicit save/stage and configured mergetool.
+- Three-stage conflict editor with per-file chunk progress, previous/next unresolved
+  navigation, bulk one-side choices, explicit save/stage and configured mergetool.
+  There is no synchronized three-pane scrolling.
 - Reviewed merge start (FF/no-ff/squash/no-commit), cherry-pick/revert with merge mainline
   and no-commit options, linear interactive rebase with backup/update-ref review.
 - Existing operation Continue/Skip/Abort with captured identities and ignored-data protection.

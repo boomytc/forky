@@ -44,6 +44,40 @@ struct DeepeningTests {
         #expect(try ConflictDocument("<<<<<<<not-marker\n=======x\n").chunks.isEmpty)
         #expect(throws: GitError.self) { try ConflictDocument("<<<<<<< a\nmissing") }
     }
+    @Test func conflictChunkNavigationCountsOnlyResolvedChunks() throws {
+        let raw = """
+        <<<<<<< HEAD
+        a
+        =======
+        b
+        >>>>>>> other
+        middle
+        <<<<<<< HEAD
+        c
+        =======
+        d
+        >>>>>>> other
+        end
+        <<<<<<< HEAD
+        e
+        =======
+        f
+        >>>>>>> other
+        """
+        let doc = try ConflictDocument(raw)
+        #expect(doc.chunks.count == 3)
+        #expect(doc.progress([:]) == ConflictProgress(resolved: 0, total: 3))
+        #expect(doc.progress([1: .ours]) == ConflictProgress(resolved: 1, total: 3))
+        #expect(doc.progress([9: .ours]) == ConflictProgress(resolved: 0, total: 3))
+        #expect(doc.nextUnresolvedID(after: nil, choices: [:]) == 0)
+        #expect(doc.nextUnresolvedID(after: 0, choices: [1: .ours]) == 2)
+        #expect(doc.nextUnresolvedID(after: 2, choices: [:]) == nil)
+        #expect(doc.previousUnresolvedID(before: nil, choices: [1: .theirs]) == 2)
+        #expect(doc.previousUnresolvedID(before: 2, choices: [1: .theirs]) == 0)
+        #expect(doc.previousUnresolvedID(before: 0, choices: [:]) == nil)
+        #expect(doc.choices(.both).count == 3)
+        #expect(doc.progress(doc.choices(.base)) == ConflictProgress(resolved: 3, total: 3))
+    }
     @Test func rebaseBackupAndExplicitUpdateRefs() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         let repo = try await f.repository(), base = try #require(try await repo.snapshot().head)

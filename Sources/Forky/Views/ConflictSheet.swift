@@ -14,6 +14,9 @@ struct ConflictSheet: View {
     @State private var document: ConflictDocument?
     @State private var choices: [Int: ConflictChoice] = [:]
     @State private var chunkError: String?
+    @State private var activeChunk: Int?
+    @State private var bulkChoice: ConflictChoice?
+    @State private var showChunks = true
     @State private var confirmTool = false
 
     var body: some View {
@@ -35,21 +38,31 @@ struct ConflictSheet: View {
                     Text("During rebase, Ours is the new base and Theirs is the replayed commit. Use stage identities, not branch-name guesses.")
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 8)
                     if let document, !document.chunks.isEmpty {
-                        DisclosureGroup("Conflict chunks (\(document.chunks.count)) · choose each side") {
-                            ScrollView {
-                                LazyVStack {
-                                    ForEach(document.chunks) { chunk in
-                                        HStack {
-                                            Text("Chunk \(chunk.id + 1)").font(.caption)
-                                            Picker("Choice", selection: Binding(get: { choices[chunk.id] ?? .unresolved }, set: { choices[chunk.id] = $0 })) {
-                                                ForEach(ConflictChoice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                                            }.labelsHidden()
-                                        }.id(chunk.id)
+                        VStack(spacing: 6) {
+                            chunkNavigation(document)
+                            DisclosureGroup(isExpanded: $showChunks) {
+                                ScrollViewReader { proxy in
+                                    ScrollView {
+                                        LazyVStack(spacing: 2) {
+                                            ForEach(document.chunks) { chunk in chunkRow(chunk) }
+                                        }
+                                    }.frame(maxHeight: 132)
+                                    .onChange(of: activeChunk) { _, value in
+                                        guard let value else { return }
+                                        withAnimation { proxy.scrollTo(value, anchor: .center) }
                                     }
                                 }
-                            }.frame(maxHeight: 105)
-                            Button("Replace Editor with These Chunk Choices") { text = document.render(choices) }
-                                .help("Explicitly replaces manual edits with this generated result. Unselected chunks keep original markers.")
+                                HStack(spacing: 8) {
+                                    Button("All Ours") { bulkChoice = .ours }.accessibilityIdentifier("conflictAllOurs")
+                                    Button("All Theirs") { bulkChoice = .theirs }.accessibilityIdentifier("conflictAllTheirs")
+                                    Spacer()
+                                    Button("Replace Editor with These Chunk Choices") { text = document.render(choices) }
+                                        .help("Explicitly replaces manual edits with this generated result. Unselected chunks keep original markers.")
+                                        .accessibilityIdentifier("conflictApplyChunks")
+                                }
+                            } label: {
+                                Text("Choose each side · \(document.chunks.count) chunks").font(.caption)
+                            }
                         }.padding(.horizontal, 10)
                     }
                     if let chunkError { Text(chunkError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 10) }
@@ -89,6 +102,17 @@ struct ConflictSheet: View {
             Button(delete ? "Delete & Stage Resolution" : "Save & Stage Resolution") { save(stage: true) }
                 .buttonStyle(.borderedProminent).disabled(review == nil || !store.canWrite).accessibilityIdentifier("conflictStage")
         }
+        .confirmationDialog(bulkChoice == .ours ? "Set every chunk to Ours?" : "Set every chunk to Theirs?",
+                            isPresented: Binding(get: { bulkChoice != nil }, set: { if !$0 { bulkChoice = nil } }),
+                            titleVisibility: .visible, presenting: bulkChoice) { choice in
+            Button(choice == .ours ? "Set All to Ours" : "Set All to Theirs") {
+                guard let document else { return }
+                choices = document.choices(choice)
+            }.accessibilityIdentifier("conflictBulkConfirm")
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This changes chunk choices only. Press Replace Editor with These Chunk Choices to apply them; nothing is staged.")
+        }
         .confirmationDialog("Run the Git-configured mergetool?", isPresented: $confirmTool) {
             Button("Run Configured Tool") {
                 guard let review else { return }
@@ -108,5 +132,48 @@ struct ConflictSheet: View {
     private func save(stage: Bool) {
         guard let review else { return }
         store.saveResolution(request, review: review, text: text, delete: delete, stage: stage, allowMarkers: allowMarkers)
+    }
+    private func positionLabel(_ document: ConflictDocument) -> String {
+        let progress = document.progress(choices)
+        guard let activeChunk, let index = document.chunks.firstIndex(where: { $0.id == activeChunk }) else {
+            return "\(progress.resolved) of \(progress.total) chunks resolved"
+        }
+        return "Chunk \(index + 1) of \(document.chunks.count) · \(progress.resolved) resolved"
+    }
+    private func chunkNavigation(_ document: ConflictDocument) -> some View {
+        let progress = document.progress(choices)
+        return HStack(spacing: 8) {
+            Text(positionLabel(document)).font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("conflictChunkProgress")
+            Spacer()
+            Button("Previous Unresolved") { jumpUnresolved(in: document, forward: false) }
+                .disabled(progress.unresolved == 0).accessibilityIdentifier("conflictPreviousChunk")
+            Button("Next Unresolved") { jumpUnresolved(in: document, forward: true) }
+                .disabled(progress.unresolved == 0).accessibilityIdentifier("conflictNextChunk")
+        }
+    }
+    private func jumpUnresolved(in document: ConflictDocument, forward: Bool) {
+        let target = forward ? document.nextUnresolvedID(after: activeChunk, choices: choices)
+                             : document.previousUnresolvedID(before: activeChunk, choices: choices)
+        if let target { activeChunk = target }
+    }
+    private func chunkRow(_ chunk: ConflictChunk) -> some View {
+        let choice = choices[chunk.id] ?? .unresolved
+        let current = activeChunk == chunk.id
+        return HStack(spacing: 6) {
+            Image(systemName: choice == .unresolved ? "circle" : "checkmark.circle.fill")
+                .foregroundStyle(choice == .unresolved ? Color.secondary : Color.green)
+            Text("Chunk \(chunk.id + 1)").font(.caption).fontWeight(current ? .semibold : .regular)
+            if current { Text("current").font(.caption2).foregroundStyle(.secondary) }
+            Spacer()
+            Picker("Choice", selection: Binding(get: { choice }, set: { choices[chunk.id] = $0; activeChunk = chunk.id })) {
+                ForEach(ConflictChoice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.labelsHidden().frame(maxWidth: 150)
+        }
+        .padding(.horizontal, 4).padding(.vertical, 2)
+        .background(current ? Color.accentColor.opacity(0.12) : .clear, in: .rect(cornerRadius: 4))
+        .contentShape(.rect)
+        .onTapGesture { activeChunk = chunk.id }
+        .id(chunk.id)
     }
 }

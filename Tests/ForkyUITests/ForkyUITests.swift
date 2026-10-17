@@ -482,6 +482,32 @@ final class ForkyUITests: XCTestCase {
         XCTAssertEqual(try git(["rev-list", "--parents", "-1", "HEAD"]).split(separator: " ").count, 3)
     }
 
+    func testConflictChunkNavigationAndBulkSideChoice() throws {
+        try prepare(modified: false)
+        try prepareMultiChunkConflict()
+        XCTAssertTrue(app.buttons["resolveConflict"].waitForExistence(timeout: 15))
+        app.buttons["resolveConflict"].click()
+        let progress = app.staticTexts["conflictChunkProgress"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(progress.value as? String, "0 of 2 chunks resolved")
+        app.buttons["conflictNextChunk"].click()
+        XCTAssertEqual(progress.value as? String, "Chunk 1 of 2 · 0 resolved")
+        app.buttons["conflictNextChunk"].click()
+        XCTAssertEqual(progress.value as? String, "Chunk 2 of 2 · 0 resolved")
+        app.buttons["conflictAllTheirs"].click()
+        let bulkConfirm = app.sheets.buttons["conflictBulkConfirm"]
+        XCTAssertTrue(bulkConfirm.waitForExistence(timeout: 5), app.debugDescription)
+        bulkConfirm.click()
+        XCTAssertEqual(progress.value as? String, "Chunk 2 of 2 · 2 resolved")
+        XCTAssertFalse(app.buttons["conflictNextChunk"].isEnabled)
+        app.buttons["conflictApplyChunks"].click()
+        app.windows.buttons["conflictStage"].click()
+        XCTAssertTrue(app.buttons["unstage:README.md"].waitForExistence(timeout: 10), app.debugDescription)
+        let content = try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8)
+        XCTAssertTrue(content.contains("THEIRS2") && content.contains("THEIRS11"), content)
+        XCTAssertFalse(content.contains("<<<<<<<"), content)
+    }
+
     func testCherryPickAndRevertSelectedCommit() throws {
         try prepare(modified: false)
         waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
@@ -769,6 +795,23 @@ final class ForkyUITests: XCTestCase {
         try git(["add", "README.md"]); try git(["commit", "-m", "Theirs"])
         try git(["switch", "main"])
         try Data("OURS\n".utf8).write(to: fixture.appendingPathComponent("README.md"))
+        try git(["add", "README.md"]); try git(["commit", "-m", "Ours"])
+        XCTAssertThrowsError(try git(["merge", "--no-edit", "other"]))
+        app.buttons["refreshRepository"].click()
+    }
+
+    private func prepareMultiChunkConflict() throws {
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)
+        let base = (1...12).map { "line\($0)" }
+        try Data((base.joined(separator: "\n") + "\n").utf8).write(to: fixture.appendingPathComponent("README.md"))
+        try git(["add", "README.md"]); try git(["commit", "-m", "Base lines"])
+        try git(["switch", "-c", "other"])
+        var theirs = base; theirs[1] = "THEIRS2"; theirs[10] = "THEIRS11"
+        try Data((theirs.joined(separator: "\n") + "\n").utf8).write(to: fixture.appendingPathComponent("README.md"))
+        try git(["add", "README.md"]); try git(["commit", "-m", "Theirs"])
+        try git(["switch", "main"])
+        var ours = base; ours[1] = "OURS2"; ours[10] = "OURS11"
+        try Data((ours.joined(separator: "\n") + "\n").utf8).write(to: fixture.appendingPathComponent("README.md"))
         try git(["add", "README.md"]); try git(["commit", "-m", "Ours"])
         XCTAssertThrowsError(try git(["merge", "--no-edit", "other"]))
         app.buttons["refreshRepository"].click()
