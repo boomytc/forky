@@ -44,7 +44,7 @@ struct ExtendedManagementSheet: View {
     private var variants: [String] {
         switch tool {
         case .worktrees: ["List", "Create", "Remove"]
-        case .settings: ["Inspect", "Set Local", "Use Git Executable"]
+        case .settings: ["Inspect", "Set Local", "Use Git Executable", "Authentication Diagnostics"]
         case .stash: ["Selected Files", "Rename", "Pop"]
         case .sync: ["Fetch Selected Remotes", "Push Selected Branches / Tags"]
         case .patches: ["Review Text Patch", "Export Commit"]
@@ -132,7 +132,7 @@ struct ExtendedManagementSheet: View {
     private var validInputs: Bool {
         switch tool {
         case .worktrees: return action == "Create" ? value.hasPrefix("/") && request.commitOID != nil : worktrees.contains { $0.id == worktreeID }
-        case .settings: return action == "Use Git Executable" ? value.hasPrefix("/") : inherit || !value.isEmpty
+        case .settings: return action == "Authentication Diagnostics" ? true : (action == "Use Git Executable" ? value.hasPrefix("/") : inherit || !value.isEmpty)
         case .stash:
             if action == "Selected Files" {
                 return !selectedFiles.isEmpty && selectedFiles.allSatisfy { id in request.expected.changes.contains { $0.id == id && !$0.isConflict && (includeUntracked || !$0.isUntracked) } }
@@ -149,7 +149,7 @@ struct ExtendedManagementSheet: View {
         }
     }
     private var isReadOnly: Bool {
-        (tool == .worktrees && action == "List") || (tool == .settings && action == "Inspect") ||
+        (tool == .worktrees && action == "List") || (tool == .settings && ["Inspect", "Authentication Diagnostics"].contains(action)) ||
         (tool == .submodules && action == "Status") || (tool == .lfs && action == "Status") ||
         (tool == .bisect && action == "Log") || (tool == .gitflow && action == "Version")
     }
@@ -169,7 +169,9 @@ struct ExtendedManagementSheet: View {
                 Text("Removal deletes this worktree directory through native Git. Current, dirty, locked and ignored-data worktrees refuse; no force removal.")
             }
         case .settings:
-            if action == "Use Git Executable" {
+            if action == "Authentication Diagnostics" {
+                Text("Read-only: SSH agent socket, SSH command override, public key filenames, GPG availability/configured signing key and redacted remote URLs. Private key material is never read; gpg/ssh are not executed; accounts and passphrases are never stored.")
+            } else if action == "Use Git Executable" {
                 AbsolutePathField(title: "Absolute trusted Git executable", value: $value, selection: .executable)
                 textField("Explicit helper PATH (blank inherits; absolute dirs separated by :)", text: $second)
                 Text("Current: " + store.gitExecutablePath + ". Applies after reopening this tab; other tabs keep their selected executable. This runs caller-selected code; no installation.")
@@ -334,9 +336,14 @@ struct ExtendedManagementSheet: View {
                 try Task.checkCancellation(); worktrees = list
                 text = list.map { $0.root.path + " · " + ($0.branch ?? "detached") }.joined(separator: "\n")
             case .settings:
-                let list = try await request.repository.settings()
-                try Task.checkCancellation(); settings = list
-                text = list.map { $0.key + " = " + ($0.effective ?? "(unset)") + ($0.local == nil ? " (inherited)" : " (local)") }.joined(separator: "\n")
+                if action == "Authentication Diagnostics" {
+                    let diagnostics = try await request.repository.authenticationDiagnostics()
+                    try Task.checkCancellation(); text = diagnostics.lines.joined(separator: "\n")
+                } else {
+                    let list = try await request.repository.settings()
+                    try Task.checkCancellation(); settings = list
+                    text = list.map { $0.key + " = " + ($0.effective ?? "(unset)") + ($0.local == nil ? " (inherited)" : " (local)") }.joined(separator: "\n")
+                }
             case .patches:
                 if action != "Review Text Patch" || value.isEmpty { busy = false; return }
                 let review = try await request.repository.reviewPatch(at: (try LocalFilePath.absolute(value)), expected: request.expected)

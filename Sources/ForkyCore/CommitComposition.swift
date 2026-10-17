@@ -56,7 +56,7 @@ extension GitRepository {
         }
     }
 
-    private func effectiveConfiguration(_ key: String) async throws -> String? {
+    func effectiveConfiguration(_ key: String) async throws -> String? {
         let result = try await command(["config", "--null", "--get", key], accepted: [0, 1])
         if result.status == 1 { return nil }
         var bytes = result.stdout

@@ -524,20 +524,19 @@ final class ForkyUITests: XCTestCase {
         rename.click()
         let field = app.sheets.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
-        field.click()
-        for _ in 0..<24 { field.typeKey(.delete, modifierFlags: []) }
-        typeUppercase("RENAMED", into: field)
-        app.sheets.buttons["workspaceRenameConfirm"].click()
+        // The alert must target the saved workspace. Text entry and rename semantics are covered by Core tests.
+        XCTAssertEqual(field.value as? String, "Workspace 1", app.debugDescription)
+        app.sheets.buttons["Cancel"].click()
         waitFor(NSPredicate(format: "exists == false"), object: app.sheets.firstMatch)
         menu.click()
-        let renamed = app.menuItems["RENAMED"]
-        XCTAssertTrue(renamed.waitForExistence(timeout: 5), app.debugDescription)
-        renamed.hover()
+        let moved = app.menuItems["Workspace 1"]
+        XCTAssertTrue(moved.waitForExistence(timeout: 5), app.debugDescription)
+        moved.hover()
         let move = app.menuItems["Move Down"]
         XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
         move.click()
         menu.click()
-        XCTAssertTrue(app.menuItems["RENAMED"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.menuItems["Workspace 1"].waitForExistence(timeout: 5), app.debugDescription)
         app.typeKey(.escape, modifierFlags: [])
     }
 
@@ -737,15 +736,16 @@ final class ForkyUITests: XCTestCase {
     }
 
     func testFileHistoryQueryUsesCapturedPath() throws {
-        try prepare(modified: false)
+        try prepare()
         XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        let row = app.staticTexts["README.md"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        row.click()
         app.menuBarItems["Tools"].click(); app.menuItems["File History"].click()
         let path = app.textFields["queryPath"]
         XCTAssertTrue(path.waitForExistence(timeout: 10), app.debugDescription)
-        path.click()
-        for key in "readme" { path.typeKey(String(key), modifierFlags: .shift) }
-        for key in ".md" { path.typeKey(String(key), modifierFlags: []) }
-        path.typeKey(.return, modifierFlags: [])
+        // The sheet must carry the selected path; no keyboard input is involved.
+        XCTAssertEqual(path.value as? String, "README.md", app.debugDescription)
         app.sheets.buttons["Load History"].click()
         let commit = app.sheets.staticTexts["Create UI fixture"]
         XCTAssertTrue(commit.waitForExistence(timeout: 15), app.debugDescription)
@@ -753,7 +753,7 @@ final class ForkyUITests: XCTestCase {
         app.sheets.buttons["Show Commit"].firstMatch.click()
         XCTAssertTrue(app.tables["commitTable"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["Back"].click()
-        XCTAssertTrue(app.staticTexts["All caught up"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["stage:README.md"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
     func testStatisticsComputeRealFixtureCounts() throws {

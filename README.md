@@ -45,7 +45,9 @@ Tools → Git Settings can select another executable and explicit helper PATH.
   merge/rebase of a separately reviewed **already fetched** upstream.
 - Stash save/preview/apply/drop, selected-file save, rename and success-then-drop pop.
 - Worktree management, frozen text-patch import/check/apply and non-overwriting export.
-- Local/inherited Git settings and original config backups; existing identity/signing/helpers.
+- Local/inherited Git settings and original config backups; existing identity/signing/helpers;
+  read-only authentication diagnostics (SSH agent/override, public-key filenames, GPG availability,
+  redacted remote URLs).
 - Submodule status with structured gitlink rows, ahead/behind and per-row update/open;
   bring-your-own LFS status/tracking/network/locks with a structured lock list.
 - Local overview/statistics, manual bisect, bring-your-own Gitflow and explicit trusted
