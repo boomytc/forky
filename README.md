@@ -24,7 +24,8 @@ Tools → Git Settings can select another executable and explicit helper PATH.
 - Filesystem/foreground refresh, debounced invalidation and stale-state write protection.
 - Per-file, filtered batch, exact line/hunk and inline stage/unstage; explicit destructive
   line discard has a separate review. Regular modified/new/deleted text is supported.
-- Staged-only commits; ordinary amend/reword with message-only default; per-repository drafts.
+- Staged-only commits with `commit.template` prefill and an explicit per-commit
+  `Signed-off-by` toggle; ordinary amend/reword with message-only default; per-repository drafts.
 - Complete branch/tag lifecycle, remote URL/name/removal and upstream management.
 - Captured graph/ref badges, frozen-root paging, message/author/committer/path/changed-text
   search, SHA navigation, date/first-parent filters and selectable merge-parent diffs.

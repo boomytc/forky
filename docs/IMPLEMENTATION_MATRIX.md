@@ -14,7 +14,7 @@ bundle. [Detailed evidence and limits](VALIDATION.md), [usage](WORKFLOWS.md).
 | ID | Implementation / entry | Evidence and remaining boundary |
 | --- | --- | --- |
 | G01 | RepositoryMonitor + RepositoryStore: recursive FSEvents, foreground/debounce, shared gate, disk/session generations | monitor/shared-gate Core tests + native external-file refresh. Failure exposes manual fallback; no background network. |
-| G02 | RepositoryManagement; Tools → Amend / Reword HEAD | message-only preserves index/bytes; staged opt-in/stale tests + native typing/amend. Publication risk reviewed; no force push. |
+| G02 | RepositoryManagement; Tools → Amend / Reword HEAD; CommitComposer | staged-only commits; `commit.template` prefill with comment/CRLF cleanup; explicit per-commit sign-off remembered per repository; message-only amend preserves index/bytes; staged opt-in/stale tests + native typing/amend. Publication risk reviewed; no force push. |
 | G03 | RepositoryManagement; Branches, Tags & Remotes | rename/delete branch/tag, lightweight/annotated tag, fetch/push URL, remote rename/remove, upstream set/clear. Real lifecycle/config/stale tests + native tag. No force branch delete or server deletion. |
 | G04 | RepositoryManagement; Merge into Current Branch / Integrate Fetched Upstream | all 4 merge modes + ignored obstruction + native no-ff. FF-only Pull remains default; integration does not fetch silently. |
 | G05 | RepositoryQueries + RepositoryReset; Reflog / Reset Current Branch | repeated reflog entries; show commit→recovery branch; soft/mixed/hard tests + native independent discard approval. Reflog pages 200 rows; a moved HEAD invalidates the cursor instead of repeating rows; no generic undo. |

@@ -200,7 +200,7 @@ public struct GitRepository: Sendable {
         }
     }
 
-    public func commit(message: String, expectedFingerprint: String) async throws {
+    public func commit(message: String, signOff: CommitSignOff = .configured, expectedFingerprint: String) async throws {
         guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               message.utf8.count <= 64 * 1024, !message.utf8.contains(0) else { throw GitError.invalidMessage }
         try await gate.withPermit {
@@ -209,8 +209,8 @@ public struct GitRepository: Sendable {
             guard !fresh.hasConflicts else { throw GitError.conflicts }
             guard !fresh.staged.isEmpty else { throw GitError.nothingStaged }
             guard fresh.indexFingerprint == expectedFingerprint else { throw GitError.staleIndex }
-            // No implicit add, --all, amend, hook bypass, or signing override.
-            _ = try await command(["commit", "-m", message], write: true)
+            // No implicit add, --all, amend or hook bypass. Signed-off-by is only what the caller selected.
+            _ = try await command(["commit"] + signOff.arguments + ["-m", message], write: true)
         }
     }
 

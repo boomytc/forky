@@ -145,6 +145,22 @@ private struct CommitComposer: View {
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(.separator.opacity(0.4)) }
                 .disabled(store.isMutating)
                 .accessibilityLabel("Commit message").accessibilityIdentifier("commitMessage")
+            if let label = store.commitTemplateLabel {
+                Label("Prefilled from " + label, systemImage: "doc.text")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help("From commit.template. Comment lines are removed; the editor content is what will be committed.")
+                    .accessibilityIdentifier("commitTemplateSource")
+            }
+            if let note = store.commitCompositionNote {
+                Label(note, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2)
+            }
+            Toggle("Sign off (Signed-off-by)", isOn: Binding(get: { store.commitSignOff }, set: store.updateCommitSignOff))
+                .toggleStyle(.checkbox).font(.system(size: 11))
+                .disabled(store.isMutating)
+                .help("Git appends a Signed-off-by line from your configured identity. The choice is remembered for this repository.")
+                .accessibilityIdentifier("commitSignOff")
             if store.snapshot?.operationInProgress == true || store.snapshot?.hasConflicts == true {
                 Label("Resolve the current Git operation or conflicts first.", systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
@@ -163,5 +179,6 @@ private struct CommitComposer: View {
             Text("Only staged files · Git hooks and signing settings apply")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }.padding(12)
+            .task(id: store.repository?.root.path ?? "") { await store.prepareCommitComposition() }
     }
 }

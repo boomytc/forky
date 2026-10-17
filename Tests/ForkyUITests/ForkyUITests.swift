@@ -119,6 +119,40 @@ final class ForkyUITests: XCTestCase {
         add(attachment)
     }
 
+    func testCommitSignOffAndTemplatePrefill() throws {
+        try prepare()
+        try Data("TEMPLATE SUBJECT\n\n# drop this line\n".utf8).write(to: fixture.appendingPathComponent(".gitmessage"))
+        try git(["config", "commit.template", ".gitmessage"])
+        app.terminate(); app.launch()
+        let message = app.textViews["commitMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 15), app.debugDescription)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "TEMPLATE SUBJECT"), evaluatedWith: message)
+        waitForExpectations(timeout: 10)
+        let value = message.value as? String ?? ""
+        XCTAssertFalse(value.contains("drop this line"), value)
+        let signOff = app.checkBoxes["commitSignOff"]
+        XCTAssertTrue(signOff.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual((signOff.value as? NSNumber)?.intValue, 0, app.debugDescription)
+        signOff.click()
+        app.buttons["stage:README.md"].click()
+        let commit = app.buttons["commitStaged"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: commit)
+        waitForExpectations(timeout: 5)
+        commit.click()
+        var committed = false
+        for _ in 0..<40 {
+            if (try? git(["log", "-1", "--format=%s"]))?.trimmingCharacters(in: .newlines) == "TEMPLATE SUBJECT" {
+                committed = true; break
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTAssertTrue(committed, app.debugDescription)
+        let body = try git(["log", "-1", "--format=%B"])
+        XCTAssertTrue(body.contains("Signed-off-by: Forky UI <ui@example.invalid>"), body)
+        XCTAssertTrue(body.contains("TEMPLATE SUBJECT"), body)
+        XCTAssertFalse(body.contains("drop this line"), body)
+    }
+
     func testHistoryAndUnstage() throws {
         try prepare()
         let stage = app.buttons["stage:README.md"]

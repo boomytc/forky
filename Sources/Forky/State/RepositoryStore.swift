@@ -68,6 +68,12 @@ final class RepositoryStore {
     private(set) var activity = "Ready"
     private(set) var recentPaths: [String] = []
     var commitMessage = ""
+    var commitSignOff = false
+    private(set) var commitTemplateText: String?
+    private(set) var commitTemplateLabel: String?
+    private(set) var commitCompositionNote: String?
+    @ObservationIgnored private var commitCompositionLoaded = false
+    private static let signOffDefaultPrefix = "forky.commitSignOff."
     var notice: AppNotice?
     var lastToolOutput: String?
     var lastToolBody: String?
@@ -191,6 +197,9 @@ final class RepositoryStore {
                 commits = []; commitFiles = []; selectedCommitID = nil; selectedCommitFileID = nil
                 selectedChange = nil; diff = .empty; diffError = nil; historyError = nil
                 commitMessage = drafts[repository.root.path] ?? ""
+                commitCompositionLoaded = false
+                commitTemplateText = nil; commitTemplateLabel = nil; commitCompositionNote = nil
+                commitSignOff = storedSignOffDefault(repository.root.path)
                 historyQuery = ""; referenceQuery = ""; fileQuery = ""
                 graph = .empty; decorations = [:]; historyCursor = nil; hasMoreHistory = false
                 selectedStashID = nil
@@ -530,11 +539,43 @@ final class RepositoryStore {
         }
     }
 
+    /// Loads `commit.template` once per opened repository.
+    /// A non-empty draft always wins over the template.
+    func prepareCommitComposition() async {
+        guard !commitCompositionLoaded, let repository else { return }
+        commitCompositionLoaded = true
+        do {
+            let composition = try await repository.commitComposition()
+            // The repository can change while configuration is read; never prefill another repository.
+            guard self.repository?.root == repository.root else { return }
+            commitTemplateText = composition.templateText
+            commitTemplateLabel = composition.templatePath.map { ($0 as NSString).abbreviatingWithTildeInPath }
+            commitCompositionNote = composition.note
+            if commitMessage.isEmpty, let text = composition.templateText { commitMessage = text }
+        } catch {
+            commitCompositionNote = "Commit template is unavailable: " + error.localizedDescription
+        }
+    }
+
+    /// The sign-off choice is Forky's own repository-scoped default; Git has no commit
+    /// sign-off configuration key (`format.signoff` only affects `format-patch`).
+    func updateCommitSignOff(_ value: Bool) {
+        commitSignOff = value
+        guard !testing, let path = repository?.root.path else { return }
+        UserDefaults.standard.set(value, forKey: Self.signOffDefaultPrefix + path)
+    }
+    private func storedSignOffDefault(_ path: String) -> Bool {
+        guard !testing else { return false }
+        return UserDefaults.standard.bool(forKey: Self.signOffDefaultPrefix + path)
+    }
+
     func commit() {
         guard canCommit, let snapshot else { return }
         let message = commitMessage, fingerprint = snapshot.indexFingerprint
+        // The checkbox is authoritative for this commit; the stored choice only seeds its initial state.
+        let signOff: CommitSignOff = commitSignOff ? .include : .omit
         mutate("Committing staged changes…", clearMessage: true) {
-            try await $0.commit(message: message, expectedFingerprint: fingerprint)
+            try await $0.commit(message: message, signOff: signOff, expectedFingerprint: fingerprint)
         }
     }
 
@@ -572,7 +613,7 @@ final class RepositoryStore {
                 do {
                     try result.operation.get()
                     completed = true
-                    if clearMessage { commitMessage = "" }
+                    if clearMessage { commitMessage = commitTemplateText ?? "" }
                 } catch is CancellationError {
                     cancelled = true
                     failures.append("Cancellation completed. Git may already have changed state; this is not an undo.")
