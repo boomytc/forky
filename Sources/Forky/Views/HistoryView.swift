@@ -1,9 +1,12 @@
 import SwiftUI
 import ForkyCore
 
+private enum HistoryDetail: String, CaseIterable { case changes = "Changes", commit = "Commit", tree = "Tree" }
 struct HistoryView: View {
     @Bindable var store: RepositoryStore
-    @State private var summary = false
+    @State private var detail = HistoryDetail.changes
+    private var queryBinding: Binding<String> { Binding(get: { store.historyQuery }, set: store.updateHistoryQuery) }
+    private var optionsBinding: Binding<HistoryOptions> { Binding(get: { store.historyOptions }, set: store.updateHistoryOptions) }
     private var title: String {
         if let ref = store.section.ref { store.snapshot?.references.first { $0.fullName == ref }?.name ?? "Reference" }
         else { "All Commits" }
@@ -12,9 +15,14 @@ struct HistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
+                if store.canNavigateBack { Button("Back", systemImage: "chevron.left", action: store.navigateBack).labelStyle(.iconOnly).help("Restore previous navigation context") }
                 Label(title, systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 8)
-                FilterField(prompt: "Search commit messages", text: $store.historyQuery, identifier: "historySearch")
+                HistoryFilters(options: optionsBinding)
+                Picker("Search type", selection: optionsBinding.search) {
+                    ForEach(HistorySearch.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }.labelsHidden().frame(width: 105)
+                FilterField(prompt: "Search selected scope", text: queryBinding, identifier: "historySearch")
                     .frame(minWidth: 150, idealWidth: 230, maxWidth: 300)
                 if store.isLoadingHistory { ProgressView().controlSize(.small) }
             }.padding(.horizontal, 12).frame(height: 40)
@@ -23,7 +31,7 @@ struct HistoryView: View {
                 EmptyPane(icon: "exclamationmark.triangle", title: "History unavailable", subtitle: error)
             } else if store.commits.isEmpty && !store.isLoadingHistory {
                 EmptyPane(icon: "clock", title: store.historyQuery.isEmpty ? "A fresh start" : "No matching commits",
-                          subtitle: store.historyQuery.isEmpty ? "Your first commit will appear here." : "Search covers commit messages in the selected branch/tag history, not just loaded rows.")
+                          subtitle: store.historyQuery.isEmpty ? "Your first commit will appear here." : "Search covers the selected query scope, not just loaded rows. SHA lookup is independent of the selected branch.")
             } else {
                 VSplitView {
                     CommitTable(commits: store.commits, graph: store.graph, decorations: store.decorations,
@@ -36,11 +44,17 @@ struct HistoryView: View {
                         .frame(minHeight: 145, idealHeight: 310)
                     VStack(spacing: 0) {
                         HStack {
-                            Picker("Commit Detail", selection: $summary) {
-                                Text("Changes").tag(false)
-                                Text("Commit").tag(true)
+                            Picker("Commit Detail", selection: $detail) {
+                                ForEach(HistoryDetail.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                             }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
                             Spacer()
+                            if let commit = store.selectedCommit, commit.parents.count > 1 {
+                                Picker("Compare parent", selection: $store.selectedParentOID) {
+                                    ForEach(Array(commit.parents.enumerated()), id: \.element) { i, parent in
+                                        Text("Parent \(i + 1) · " + String(parent.prefix(8))).tag(Optional(parent))
+                                    }
+                                }.frame(maxWidth: 170)
+                            }
                             if let commit = store.selectedCommit {
                                 Text(commit.shortOID).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                                 Text("\(store.commitFiles.count) \(store.commitFiles.count == 1 ? "file" : "files")").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -55,7 +69,9 @@ struct HistoryView: View {
                         }.padding(.horizontal, 12).frame(height: 34)
                         Divider()
                         if let commit = store.selectedCommit {
-                            if summary {
+                            if detail == .tree, let repository = store.repository, let expected = store.snapshot {
+                                TreeSheet(request: AdvancedRequest(repository: repository, expected: expected, action: .tree(commit)), commit: commit, store: store, embedded: true).id(commit.id)
+                            } else if detail == .commit {
                                 CommitSummary(commit: commit, references: store.decorations[commit.id] ?? [])
                             } else {
                                 HStack(spacing: 10) {
@@ -90,7 +106,7 @@ struct HistoryView: View {
             }
             HStack(spacing: 10) {
                 Text("\(store.commits.count) \(store.historyQuery.isEmpty ? "commits" : "matches") loaded")
-                if !store.historyQuery.isEmpty { Text("· Graph hidden for filtered results").foregroundStyle(.tertiary) }
+                if !store.historyQuery.isEmpty || store.historyOptions.firstParent { Text("· Graph hidden for constrained ancestry").foregroundStyle(.tertiary) }
                 Spacer()
                 if store.hasMoreHistory {
                     Button("Load More") { store.loadHistory(append: true) }
@@ -100,7 +116,7 @@ struct HistoryView: View {
             .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 28)
             .overlay(alignment: .top) { Divider() }
         }
-        .onChange(of: store.historyQuery) { _, _ in store.loadHistory(debounce: true) }
+        .onChange(of: store.selectedParentOID) { _, _ in store.parentChanged() }
     }
 }
 

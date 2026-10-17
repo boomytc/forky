@@ -42,9 +42,15 @@ final class RepositoryStore {
     private(set) var graph = CommitGraph.empty
     private(set) var decorations: [String: [GitReference]] = [:]
     var historyQuery = ""
+    var historyOptions = HistoryOptions()
+    @ObservationIgnored private var pendingCommitPath: GitPath?
+    private(set) var historyBack: [HistoryLocation] = []
+    var canNavigateBack: Bool { !historyBack.isEmpty && !isMutating }
     var referenceQuery = ""
     var fileQuery = ""
     var diffMode = DiffMode.unified
+    var diffOptions = DiffOptions()
+    var selectedParentOID: String?
     var sheet: WorkspaceSheet?
     private(set) var selectedStashID: String?
     private(set) var operations: [OperationRecord] = []
@@ -63,6 +69,11 @@ final class RepositoryStore {
     private(set) var recentPaths: [String] = []
     var commitMessage = ""
     var notice: AppNotice?
+    var lastToolOutput: String?
+    var lastToolBody: String?
+    var latestDiagnostic: String?
+    var gitExecutablePath = "/usr/bin/git"
+    var explicitHelperPATH = ""
 
     @ObservationIgnored private var sessionID = UUID()
     @ObservationIgnored private var refreshID = UUID()
@@ -77,11 +88,19 @@ final class RepositoryStore {
     @ObservationIgnored private var bootstrapped = false
     @ObservationIgnored private var historyCursor: HistoryCursor?
     @ObservationIgnored private var drafts: [String: String] = [:]
+    @ObservationIgnored private var diskGeneration = 0
+    @ObservationIgnored private var monitor: RepositoryMonitor?
+    @ObservationIgnored private var monitorTask: Task<Void, Never>?
+    var monitorWarning: String?
     var editDrafts: [String: String] = [:]
     @ObservationIgnored private let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
 
     init() {
-        if !testing { recentPaths = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? [] }
+        if !testing {
+            recentPaths = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? []
+            gitExecutablePath = UserDefaults.standard.string(forKey: "forky.gitExecutable") ?? "/usr/bin/git"
+            explicitHelperPATH = UserDefaults.standard.string(forKey: "forky.helperPATH") ?? ""
+        }
     }
 
     var isBusy: Bool { isLoading || isRefreshing || isMutating }
@@ -107,6 +126,24 @@ final class RepositoryStore {
         if let index = args.firstIndex(of: "--repository"), index + 1 < args.count {
             open(URL(fileURLWithPath: args[index + 1], isDirectory: true))
         }
+    }
+
+    func useGitExecutable(_ path: String, helperPATH: String = "") {
+        guard canWrite, path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) else {
+            show(GitError.invalidInput("Choose an existing absolute executable; nothing is installed."), title: "Invalid Git executable"); return
+        }
+        guard !helperPATH.utf8.contains(0), helperPATH.utf8.count <= 65536,
+              helperPATH.isEmpty || helperPATH.split(separator: ":", omittingEmptySubsequences: false).allSatisfy({ $0.hasPrefix("/") }) else {
+            show(GitError.invalidInput("Helper PATH must use absolute, nonempty directory entries; blank inherits without persisting ambient values."), title: "Invalid helper PATH"); return
+        }
+        gitExecutablePath = path; explicitHelperPATH = helperPATH
+        if !testing {
+            UserDefaults.standard.set(path, forKey: "forky.gitExecutable")
+            if helperPATH.isEmpty { UserDefaults.standard.removeObject(forKey: "forky.helperPATH") }
+            else { UserDefaults.standard.set(helperPATH, forKey: "forky.helperPATH") }
+        }
+        sheet = nil
+        if let root = repository?.root { open(root) }
     }
 
     func chooseRepository() {
@@ -136,15 +173,21 @@ final class RepositoryStore {
         activity = "Opening repository…"
         openTask = Task {
             do {
-                let repository = try await GitRepository.open(url)
+                var environment = ProcessInfo.processInfo.environment
+                if !explicitHelperPATH.isEmpty { environment["PATH"] = explicitHelperPATH }
+                let repository = try await GitRepository.open(url, runner: .init(executable: URL(fileURLWithPath: gitExecutablePath), environment: environment))
+                try Task.checkCancellation()
+                guard sessionID == session else { return }
+                startMonitor(repository)
+                let observedGeneration = diskGeneration
                 let snapshot = try await repository.snapshot()
                 try Task.checkCancellation()
                 guard sessionID == session else { return }
                 if let previous = self.repository { drafts[previous.root.path] = commitMessage }
                 self.repository = repository
                 self.snapshot = snapshot
-                snapshotIsCurrent = true
-                section = .changes
+                snapshotIsCurrent = observedGeneration == diskGeneration
+                section = .changes; historyBack = []
                 commits = []; commitFiles = []; selectedCommitID = nil; selectedCommitFileID = nil
                 selectedChange = nil; diff = .empty; diffError = nil; historyError = nil
                 commitMessage = drafts[repository.root.path] ?? ""
@@ -161,16 +204,59 @@ final class RepositoryStore {
                 guard sessionID == session else { return }
                 isLoading = false
                 activity = "Could not open repository"
+                if let repository = self.repository { startMonitor(repository); invalidateFromDisk() }
                 show(error, title: "Could not open repository")
             }
         }
+    }
+
+    private func startMonitor(_ repository: GitRepository) {
+        monitorTask?.cancel(); monitor?.stop(); monitor = nil; monitorWarning = nil
+        let session = sessionID
+        do {
+            monitor = try RepositoryMonitor(paths: [repository.root, repository.gitDirectory, repository.commonDirectory]) { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, self.sessionID == session else { return }
+                    self.invalidateFromDisk()
+                }
+            }
+        } catch { monitorWarning = error.localizedDescription }
+    }
+
+    func invalidateFromDisk() {
+        // The generation is changed synchronously. Late callbacks cannot target another root.
+        snapshotIsCurrent = false; diskGeneration &+= 1
+        monitorTask?.cancel()
+        let session = sessionID
+        monitorTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(550))
+                while let self, self.isBusy {
+                    try await Task.sleep(for: .milliseconds(150))
+                }
+                try Task.checkCancellation()
+                guard let self, self.sessionID == session else { return }
+                self.refresh()
+            } catch {}
+        }
+    }
+
+    func stopObserving() { monitor?.stop(); monitor = nil; monitorTask?.cancel() }
+    func suspendSession() {
+        guard !isMutating else { return }
+        stopObserving(); cancelReads(); openTask?.cancel(); refreshTask?.cancel()
+        sessionID = UUID()
+        isLoading = false; isRefreshing = false; isLoadingDetail = false; isLoadingHistory = false
+    }
+    func resumeSession() {
+        if let repository { startMonitor(repository); refresh() }
     }
 
     func refresh() {
         guard let repository, !isMutating, !isLoading else { return }
         refreshTask?.cancel()
         let id = UUID(); refreshID = id
-        let session = sessionID
+        let session = sessionID, observedGeneration = diskGeneration
         isRefreshing = true
         activity = "Refreshing…"
         refreshTask = Task {
@@ -178,7 +264,7 @@ final class RepositoryStore {
                 let value = try await repository.snapshot()
                 try Task.checkCancellation()
                 guard sessionID == session, refreshID == id else { return }
-                snapshot = value; snapshotIsCurrent = true
+                snapshot = value; snapshotIsCurrent = observedGeneration == diskGeneration
                 isRefreshing = false; activity = "Ready"
                 reloadSelection()
             } catch is CancellationError {
@@ -230,11 +316,11 @@ final class RepositoryStore {
         diff = .empty; diffError = nil; isLoadingDetail = false
         guard let repository, let selection = selectedChange,
               let change = snapshot?.changes.first(where: { $0.id == selection.path }) else { return }
-        let id = detailID
+        let id = detailID, options = diffOptions
         isLoadingDetail = true
         detailTask = Task {
             do {
-                let text = try await repository.diff(change, side: selection.side)
+                let text = try await repository.diff(change, side: selection.side, options: options)
                 let document = await Task.detached { DiffDocument(text: text) }.value
                 try Task.checkCancellation()
                 guard detailID == id else { return }
@@ -258,6 +344,7 @@ final class RepositoryStore {
         let previousCommits = append ? commits : []
         let ref = section.ref
         let query = historyQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let options = historyOptions
         if !append {
             commits = []; graph = .empty; decorations = [:]; hasMoreHistory = false; historyCursor = nil
             selectCommit(nil)
@@ -266,9 +353,9 @@ final class RepositoryStore {
         historyTask = Task {
             do {
                 if debounce { try await Task.sleep(for: .milliseconds(280)) }
-                let page = try await repository.history(ref: ref, query: query, cursor: cursor)
+                let page = try await repository.history(ref: ref, query: query, cursor: cursor, options: options)
                 let values = previousCommits + page.commits
-                let layout = await Task.detached { query.isEmpty ? CommitGraph(commits: values) : .empty }.value
+                let layout = await Task.detached { query.isEmpty && !options.firstParent ? CommitGraph(commits: values) : .empty }.value
                 try Task.checkCancellation()
                 guard historyID == id, sessionID == session else { return }
                 commits = values; graph = layout
@@ -299,15 +386,18 @@ final class RepositoryStore {
         detailTask?.cancel(); detailID = UUID()
         diff = .empty; diffError = nil; isLoadingDetail = false
         guard let repository, let commit = selectedCommit else { return }
-        let token = detailID
+        if !commit.parents.contains(selectedParentOID ?? "") { selectedParentOID = commit.parents.first }
+        let token = detailID, parent = selectedParentOID
         isLoadingDetail = true
         detailTask = Task {
             do {
-                let files = try await repository.files(in: commit)
+                let files = try await repository.files(in: commit, parent: parent)
                 try Task.checkCancellation()
                 guard detailID == token else { return }
                 commitFiles = files; isLoadingDetail = false
-                selectCommitFile(files.first?.id)
+                let selected = files.first { $0.path == pendingCommitPath } ?? files.first
+                pendingCommitPath = nil
+                selectCommitFile(selected?.id)
             } catch is CancellationError {
                 if detailID == token { isLoadingDetail = false }
             } catch {
@@ -323,11 +413,11 @@ final class RepositoryStore {
         diff = .empty; diffError = nil; isLoadingDetail = false
         guard let repository, let commit = selectedCommit,
               let file = commitFiles.first(where: { $0.id == id }) else { return }
-        let token = detailID
+        let token = detailID, parent = selectedParentOID, options = diffOptions
         isLoadingDetail = true
         detailTask = Task {
             do {
-                let text = try await repository.diff(file, in: commit)
+                let text = try await repository.diff(file, in: commit, parent: parent, options: options)
                 let document = await Task.detached { DiffDocument(text: text) }.value
                 try Task.checkCancellation()
                 guard detailID == token else { return }
@@ -338,6 +428,59 @@ final class RepositoryStore {
                 guard detailID == token else { return }
                 diffError = error.localizedDescription; isLoadingDetail = false
             }
+        }
+    }
+
+    func diffSettingsChanged() {
+        if section == .changes { loadChangeDiff() }
+        else if section.isHistory { selectCommitFile(selectedCommitFileID) }
+    }
+    func parentChanged() { selectCommit(selectedCommitID) }
+
+    func updateHistoryQuery(_ query: String) {
+        guard query != historyQuery else { return }
+        historyQuery = query; loadHistory(debounce: true)
+    }
+    func updateHistoryOptions(_ options: HistoryOptions) {
+        guard options != historyOptions else { return }
+        historyOptions = options; loadHistory()
+    }
+    private func rememberLocation() {
+        let location = HistoryLocation(section: section, query: historyQuery, options: historyOptions,
+            commits: commits, cursor: historyCursor, graph: graph, decorations: decorations,
+            commitID: selectedCommitID, filePath: commitFiles.first { $0.id == selectedCommitFileID }?.path,
+            parentOID: selectedParentOID, change: selectedChange, more: hasMoreHistory)
+        historyBack.insert(location, at: 0)
+        while historyBack.count > 8 || historyBack.reduce(0, { $0 + $1.commits.count }) > 10_000
+                || historyBack.reduce(0, { $0 + $1.messageBytes }) > 16 * 1024 * 1024 { historyBack.removeLast() }
+    }
+    func navigateBack() {
+        guard canNavigateBack else { return }
+        let location = historyBack.removeFirst()
+        cancelReads()
+        section = location.section; historyQuery = location.query; historyOptions = location.options
+        commits = location.commits; historyCursor = location.cursor; graph = location.graph; decorations = location.decorations
+        hasMoreHistory = location.more; selectedChange = location.change
+        if section.isHistory { pendingCommitPath = location.filePath; selectedParentOID = location.parentOID; selectCommit(location.commitID) }
+        else { reloadSelection() }
+    }
+
+    func revealCommit(_ oid: String, path: GitPath? = nil) {
+        guard let repository, !isMutating else { return }
+        sheet = nil; detailTask?.cancel(); detailID = UUID()
+        let token = detailID, session = sessionID
+        detailTask = Task {
+            do {
+                let commit = try await repository.commitInfo(oid)
+                try Task.checkCancellation()
+                guard detailID == token, sessionID == session else { return }
+                rememberLocation()
+                historyTask?.cancel(); historyID = UUID(); isLoadingHistory = false
+                section = .history; historyQuery = ""; historyOptions = .init()
+                commits = [commit]; graph = .empty; decorations = [:]; historyCursor = nil; hasMoreHistory = false
+                pendingCommitPath = path
+                selectCommit(commit.id)
+            } catch is CancellationError {} catch { show(error, title: "Commit unavailable") }
         }
     }
 
@@ -421,7 +564,8 @@ final class RepositoryStore {
             var completed = false, cancelled = false
             do {
                 let result = try await lifecycle.execute(operation: operation, reconcile: {
-                    try await originalRepository?.snapshot()
+                    let generation = await MainActor.run { self.diskGeneration }
+                    return (try await originalRepository?.snapshot(), generation)
                 }, willReconcile: {
                     await MainActor.run { self.operationPhase = .reconciling; self.activity = "Checking repository state…" }
                 })
@@ -434,7 +578,8 @@ final class RepositoryStore {
                     failures.append("Cancellation completed. Git may already have changed state; this is not an undo.")
                 } catch { failures.append(error.localizedDescription) }
                 do {
-                    if let state = try result.reconciliation.get() { snapshot = state; snapshotIsCurrent = true }
+                    let observed = try result.reconciliation.get()
+                    if let state = observed.0 { snapshot = state; snapshotIsCurrent = observed.1 == diskGeneration }
                 } catch { failures.append("Repository refresh also failed: " + error.localizedDescription) }
             } catch { failures.append(error.localizedDescription) }
             runningLifecycle = nil
@@ -448,8 +593,9 @@ final class RepositoryStore {
             operationPhase = .idle
             activity = failures.isEmpty ? "Ready" : (cancelled ? "Cancelled · review state" : "Operation finished with an error")
             if !failures.isEmpty {
+                latestDiagnostic = title + "\n" + (originalRepository?.root.path ?? "") + "\n\n" + failures.joined(separator: "\n\n")
                 notice = AppNotice(title: cancelled ? "Operation cancelled — review state" : "Git operation failed — review repository state",
-                                   message: failures.joined(separator: "\n\n"))
+                                   message: String(failures.joined(separator: "\n\n").prefix(12_000)) + (failures.joined(separator: "\n\n").count > 12_000 ? "\n[Alert preview truncated; full latest diagnostics are in Activity.]" : ""))
             }
             mutationTask = nil
             if completed, let openAfter { open(openAfter) }

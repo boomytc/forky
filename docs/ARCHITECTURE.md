@@ -101,8 +101,10 @@ facts. It never consumes the truncated DiffDocument presentation. Both direction
 forward patches FROM the index (Git -R produces unstage input). Unselected deletion
 becomes context; unselected addition is omitted; coordinates/counts and no-newline
 markers are preserved. HEAD/index and exact source patch are rechecked before Git
-checks/applies the index-only result. Scope is regular tracked text modifications,
-with a 20,000-patch-line selection budget.
+checks/applies the index-only result. Regular modified/new/deleted text is supported,
+with a 20,000-patch-line selection budget. Reverse working discard has a different
+review/method and separate destructive authorization; it cannot be selected by an
+index-only command flag. DiffOptions never changes the canonical write patch.
 
 ConflictReview owns stage identities and working bytes. Save rechecks both, rejects
 unsafe types/symlink traversal and writes one regular path before optional staging.
@@ -129,8 +131,10 @@ RebasePlan owns a complete linear range and captured base/HEAD. Typed commands r
 each commit once, including drop. Onto refs are rechecked by captured identity.
 A fixed native sequence-editor callback copies a private todo input through a quoted
 invocation-local environment operand. User code is not interpolated. Native todo
-survives input cleanup and pauses. Autostash/autosquash/update-refs and submodule
-recursion are disabled. Edit/reword is explicit paused amendment, then Continue.
+survives input cleanup and pauses. Autostash/autosquash and submodule recursion are
+disabled. Update-refs is disabled by default; explicit eligible branches generate
+native update-ref instructions and validated pending state. Backup tags cannot be
+rewritten as eligible branch refs. Edit/reword is explicit paused amendment, then Continue.
 Unsupported external todo commands do not execute silently.
 
 HistorySafety checks complete possible write paths against ignored obstructions
@@ -149,10 +153,35 @@ Context payload captures the clicked commit, not current selection or catalog po
 Store checks session/root and write eligibility before routing immutable AdvancedRequest.
 Views never invoke Git directly.
 
-## Remaining product work
+## Extended workflow ownership
 
-Partial added/deleted/renamed/binary/mode-change files, complex conflicts, new merge-start
-UI/mainline selection, merge-preserving rebase, tag/branch lifecycle, filesystem watching,
-accounts and broad platform/performance verification remain. Split diff is a display
-representation, separate from exact selectable patches.
-See ADVANCED_WORKFLOWS.md, ALIGNMENT.md and VALIDATION.md.
+WorkspaceHub owns independent stores, saved/closed sessions and whole-window quit
+eligibility. RepositoryGates weakly shares one gate per canonical Git common directory.
+DirectoryIdentity owns filesystem lookup identity separately from URL presentation.
+RepositoryMonitor owns FSEventStream resources; the store owns coalescing, disk generation,
+session cancellation and publish eligibility. A newer event cannot be cleared by an
+older read, including after final write reconciliation.
+
+RepositoryManagement owns normal amend/ref/merge preflights. RepositoryQueries owns
+search/date/cursor identity, reflog framing, rename-following file history and comparisons.
+HistoryLocation retains bounded navigation facts without rerunning inputs via view
+onChange. Explicit binding setters distinguish user queries from restored frozen results.
+
+CollaborationManagement owns selected literal stash paths, native reflog rename/pop,
+worktree ownership and selected transport refs. RepositoryTools owns settings/backups,
+frozen text patches, child-submodule gates, LFS and trusted helper boundaries. Bisect
+owns its native state/preflight; Gitflow owns named BYO argv presets. RepositoryMedia
+owns captured image bytes/decode constraints and complete UTC statistics.
+
+Process failure preserves stderr AND stdout, which can describe accepted refs before
+another ref fails. Activity retains one full latest diagnostic and bounded older previews.
+Explicit helper executable changes preserve the caller-selected process environment;
+ambient environment is never serialized merely because a child inherits it.
+
+## Deliberate exclusions / verification limits
+
+Partial rename/type/mode/binary edits, complex conflicts, merge-preserving/exec rebase,
+word diff/highlighting, built-in accounts/AI providers, automatic bisect-run, broad
+platform/provider/performance guarantees and notarization remain outside scope.
+Split/image diff is presentation, never input to exact selectable writes.
+See WORKFLOWS.md, IMPLEMENTATION_MATRIX.md and VALIDATION.md.

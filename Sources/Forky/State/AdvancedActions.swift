@@ -2,7 +2,7 @@ import Foundation
 import ForkyCore
 
 enum AdvancedAction {
-    case partial(FileChange, DiffSide), conflict(FileChange), commit(CommitAction, GitCommit)
+    case partial(FileChange, DiffSide), discard(FileChange), conflict(FileChange), commit(CommitAction, GitCommit)
     case rebase(GitCommit), operation, tree(GitCommit)
 }
 struct AdvancedRequest: Identifiable {

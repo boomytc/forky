@@ -1,165 +1,106 @@
 # Forky
 
-A focused, native Git workspace for macOS. Independently implemented in SwiftUI,
-AppKit and Swift 6; **macOS 14+**, no third-party package dependencies.
+A native Git workspace for macOS, independently implemented in SwiftUI, AppKit and
+Swift 6. **macOS 14+**, original branding/assets, no third-party package dependencies.
 
-## Open and run
-
-```bash
-cd /Users/boom/workspace/forky
-open Forky.xcodeproj
-```
-
-Select the **Forky** scheme, destination **My Mac**, then **⌘R**.
-Use **⌘U** for core and native UI tests. A local development signing team may be
-selected in Xcode; the provided scripts use ad-hoc signing without an Apple account.
-
-Terminal build:
+## Build and run
 
 ```bash
-./scripts/build.sh
+open Forky.xcodeproj                 # Forky scheme → My Mac → ⌘R; ⌘U tests
+./scripts/build.sh                  # ad-hoc development signing, no account needed
 open .artifacts/DerivedData/Build/Products/Debug/Forky.app
+# Optional startup repository:
+open .artifacts/DerivedData/Build/Products/Debug/Forky.app --args --repository /absolute/path
 ```
 
-Open a specific trusted repository:
+No installation into /Applications, global tool changes or REA registration.
+Bring your own Xcode/Command Line Tools and trusted Git; default is /usr/bin/git.
+Tools → Git Settings can select another executable and explicit helper PATH.
+
+## Workflows
+
+- Independent repository tabs, recents, reopen-closed sessions and saved repository workspaces.
+- Open linked worktrees/subdirectories; clone/init only into newly reserved directories.
+- Filesystem/foreground refresh, debounced invalidation and stale-state write protection.
+- Per-file, filtered batch, exact line/hunk and inline stage/unstage; explicit destructive
+  line discard has a separate review. Regular modified/new/deleted text is supported.
+- Staged-only commits; ordinary amend/reword with message-only default; per-repository drafts.
+- Complete branch/tag lifecycle, remote URL/name/removal and upstream management.
+- Captured graph/ref badges, frozen-root paging, message/author/committer/path/changed-text
+  search, SHA navigation, date/first-parent filters and selectable merge-parent diffs.
+- Embedded tree/blob/blame, rename-following file history, back navigation, two-revision
+  or working comparisons, reflog recovery and separately approved reset modes.
+- Unified/split diff, context/whitespace/wrap/hunk controls; image side/swipe/onion comparison.
+- Three-stage conflict editor, chunk choices, explicit save/stage and configured mergetool.
+- Reviewed merge start (FF/no-ff/squash/no-commit), cherry-pick/revert with merge mainline
+  and no-commit options, linear interactive rebase with backup/update-ref review.
+- Existing operation Continue/Skip/Abort with captured identities and ignored-data protection.
+- Remote fetch, FF-only Pull, explicit immutable branch/tag push, selected-remotes fetch;
+  merge/rebase of a separately reviewed **already fetched** upstream.
+- Stash save/preview/apply/drop, selected-file save, rename and success-then-drop pop.
+- Worktree management, frozen text-patch import/check/apply and non-overwriting export.
+- Local/inherited Git settings and original config backups; existing identity/signing/helpers.
+- Submodule status/add/open/update; bring-your-own LFS status/tracking/network/locks.
+- Local overview/statistics, manual bisect, bring-your-own Gitflow and explicit trusted
+  executable/JSON-argv tools, including optional AI draft generation.
+
+Use the **Tools** menu for secondary workflows. History context actions use the clicked
+commit, not the old selection. Every action has a real handler or explicit unavailable
+reason; optional helpers are never installed or silently emulated.
+
+[Workflow guide](docs/WORKFLOWS.md) · [G01–G22 implementation matrix](docs/IMPLEMENTATION_MATRIX.md)
+· [Architecture](docs/ARCHITECTURE.md) · [Validation](docs/VALIDATION.md)
+
+## Safety and boundaries
+
+Only open trusted repositories. Commands use direct argv and literal/NUL-framed paths;
+the fixed rebase sequence-editor callback is the documented narrow exception.
+Git hooks, filters, signing, helpers and URL rewrites remain configured user code,
+not a sandbox. Non-UTF-8/unsafe paths refuse instead of being normalized to other files.
+
+Shared repository gates serialize this app's sessions, not other clients. Captured
+HEAD/index/config/ref/worktree facts are rechecked; writes—including failed/cancelled
+ones—finish independent reconciliation. Stale/unavailable state disables writes.
+Checks are sequential, not cross-client atomic locks. Cancellation is **not rollback**.
+Only directly owned children are supervised; arbitrary descendants are not contained.
+
+No automatic networking/stashing, force/mirror push, background remote polling, hidden
+stage-all or checkout. Normal Pull stays FF-only; divergence requires explicit integration.
+Configured helper/Gitflow/custom/AI code may have broader side effects and must be reviewed.
+Terminal credential prompts are disabled. No new credential/account store or installation.
+Known HTTP URL authentication is redacted; new embedded credentials are rejected.
+Helper output can contain its own data: inspect diagnostics before sharing.
+
+Clone/worktree creation reserves a new directory and retains failed/cancelled output.
+Pop drops only after successful apply and unchanged list; reset/hunk discard/Skip/Abort
+are explicitly destructive and cannot recover unstaged data from a reflog or backup tag.
+Transport can partially succeed; Activity retains full latest diagnostics plus bounded
+session previews. Push never silently includes unselected refs or force options.
+
+Process output: 4 MiB/stream; deadlines 30 s local, 300 s transport/history tools, 900 s
+creation. Display diffs preview 500,000 characters with a truncation marker; selectable
+patches must be complete (20,000 lines). Conflict editing ≤4 MiB/file, retained drafts
+16 MiB/session. Rebase/bisect review ≤200 commits; blame ≤20,000 rows. File history/reflog
+show a marked first 200 records. Oversize/unknown input is not an empty successful result.
+
+Deliberate remaining exclusions: partial rename/type/mode/binary edits, complex conflict
+types, merge-preserving/arbitrary-exec rebase, syntax/word diff, built-in service accounts
+or AI providers, automatic bisect-run and notarized distribution. Specialized helper and
+platform coverage is explicitly limited in the validation report, not full Fork parity.
+
+## Test
 
 ```bash
-open .artifacts/DerivedData/Build/Products/Debug/Forky.app --args --repository /absolute/path/to/repo
+swift test
+./scripts/test.sh
+./scripts/test.sh -only-testing:ForkyUITests/ForkyUITests/testNormalAmendMessageOnly
 ```
 
-No installation into /Applications, global tool changes, or REA MCP registration is required.
-The app invokes `/usr/bin/git`; Xcode / Command Line Tools must already be available.
+Latest full gate: **147 passed = 116 Core + 31 native UI, 0 failed, 0 skipped**.
+Fixtures are newly created and isolated; never Fork.app, business repositories, actual
+remote accounts or global Git config. Results/screenshots remain ignored .artifacts files.
 
-## Current workflows
-
-- Open an existing worktree/subdirectory and switch between recent repositories.
-- Clone or initialize in a **new** folder, then open it; existing directories are never adopted.
-- Add remotes, fetch tracking refs, pull **fast-forward only**, and push/publish one reviewed
-  branch with optional upstream setup. Explicit remote/destination review before network access.
-- Locally observed upstream / ahead / behind state; Fetch updates it, not a background network poll.
-- Save / preview / apply / drop stashes. Including untracked files is opt-in; applying keeps
-  the recovery entry, including on conflict. Restore staged/unstaged separation optionally.
-- Cancellable long operations, uncancelled final state checks, and a bounded session activity
-  list identifying the repository. Cancellation and errors are never presented as rollbacks.
-- Collapsible branch/remote/tag sidebar with a live name filter.
-- Connected, topological commit graph with local/remote/annotated-tag badges.
-- Frozen-root history paging (200 commits per page) and literal, case-insensitive
-  **commit-message** search across the selected history, not just loaded rows.
-- Commit summary: full SHA, parents, author/email, date, full body and references;
-  changes use root or first-parent merge diffs.
-- Compact changed-file list, file filtering, unified or synchronized side-by-side
-  line-numbered diff, and Finder/copy-path context actions.
-- Per-file stage/unstage by button, context menu or double-click. Stage All / Unstage
-  All require confirmation; with a filter, **only visible listed files** are affected.
-- Commit **only explicitly staged files**, with stale-index/conflict/operation checks,
-  soft summary-length guidance and in-memory drafts when switching repositories.
-- Create a branch at HEAD or the **selected historical commit without switching**. Checkout is a separate,
-  confirmed local-branch action, requiring a clean worktree and unchanged destination.
-  Single-clicking a branch/tag only filters history; double-clicking a local branch
-  requests checkout confirmation. Remote branches can create and switch to a new local
-  **tracking branch** after confirmation; symbolic aliases are not checkout targets.
-- ⌘O open, ⌘R refresh, ⌘1 changes, ⌘2 history, ⌘3 stashes, ⇧⌘N new branch,
-  ⇧⌘S stash, ⌘↩ commit.
-- Line / hunk stage and unstage for regular tracked text modifications; index-only,
-  exact-preview freshness checks, worktree bytes unchanged.
-- Three-way conflict editor: Base / Ours / Theirs, editable result, save-only or explicit
-  stage resolution, including modify/delete. Remaining marker lines require approval.
-- Confirmed non-merge cherry-pick / revert, plus operation Continue / Skip / Abort.
-- Interactive linear rebase: reorder, pick, edit/reword, squash, fixup, drop and optional
-  captured onto reference. Edit pauses for an explicit amend before Continue.
-- Browse the selected commit's complete file tree; blob preview and per-line blame,
-  preserving the commit anchor even when worktree/HEAD changes.
-- Same named history commands in the clicked-row context menu and detail menu.
-- Native appearance, resizable panes and original Forky artwork.
-
-See [advanced workflows](docs/ADVANCED_WORKFLOWS.md) for usage and deliberate limits.
-
-Not yet implemented: partial staging of new/deleted/renamed/binary/mode-change files,
-merge-preserving rebase or arbitrary exec todo, merge-commit mainline selection, a new
-merge-start UI, branch/tag deletion, stash pop, automatic filesystem watching,
-credential/account management, AI, configurable Git executable or notarization.
-Diverged pulls still stop rather than guessing a merge/rebase policy.
-
-See [the alignment notes](docs/ALIGNMENT.md) for reference sources and remaining gaps.
-
-## Safety and limits
-
-Only open repositories you trust. Git can invoke configured clean/smudge filters, signing
-tools, commit hooks and checkout hooks. Forky disables external diff/textconv and fsmonitor commands for its
-queries, but it is **not a sandbox for malicious Git configuration**.
-
-Commands use argv arrays, literal pathspecs and NUL-framed output, not a shell.
-Ambient GIT_* overrides are discarded to preserve the selected worktree.
-Operations share a cancellable repository gate. Read failure is never an empty clean
-repository; stale snapshots disable writes. Existing-repository writes, successful or
-not, are followed by a refresh. Successful creation opens/reads the new repository;
-failed creation retains its location for inspection. Failures are not rollbacks.
-
-Before commit, Forky compares HEAD and the staged diff with the reviewed snapshot.
-This catches many external index changes, but is **not an atomic lock against other Git
-clients**. Do not concurrently write the same repository from another client.
-
-Process output is limited to 4 MiB per stream. Local commands have a 30-second deadline;
-transport/history-edit commands use 300 seconds, creation/clone uses 900 seconds. The diff
-renderer separately previews at most 500,000 characters and marks truncation.
-Timeout/cancellation controls the directly owned Git process, not arbitrary descendants
-started by hooks or filters. A helper that keeps output open produces an explicit
-incomplete-output error. A failed or interrupted write may have already changed state;
-inspect/refresh before retrying. Non-UTF-8 paths are rejected rather than rewritten.
-
-There are no automatic remote operations, force pushes, standalone discard/reset/clean
-actions, or hidden stage-all/checkout. Explicit Skip/Abort are destructive native Git
-steps; review their full changed scope. Abort is not a general undo. Checkout refuses dirty worktrees, refuses overwriting ignored
-files, does not recurse into submodules, and respects other worktrees' branch ownership.
-
-Network access happens only after your explicit confirmation. Git URL rewrite rules,
-SSH agent/configuration, credential helpers, remote helpers and pre-push hooks remain
-effective. No new credential storage/account login is provided. Terminal credential prompts
-are disabled; configure an existing helper/agent if authentication fails. Known HTTP URL
-userinfo is hidden in remote presentation/errors; new URLs with embedded credentials are
-rejected. Helper/hook output can contain its own data; review diagnostics before sharing.
-New local source paths must be absolute; there is no shell tilde expansion.
-History replay checks ignored obstructions across the onto transition and pending commit
-paths before starting; a clean porcelain status alone does not protect ignored local data.
-
-Fetch deliberately omits pruning, automatic tags and recursive submodules. Mirror and
-custom fetch mappings outside a remote's tracking namespace fail closed. Push never
-forces or follows tags and sends one explicit immutable commit/refspec. Upstream setup
-is a subsequent local step: it can fail **after the remote push succeeds**. Pull can update
-tracking refs even when fast-forward fails. Stash drop checks the captured full list and
-selector/OID; other Git clients must not concurrently mutate it. These checks are not
-cross-process atomic transactions.
-
-Commit drafts/recents/activity remain local UI state, not AI/service uploads. Your explicitly
-requested Git transport can send repository data to the chosen remote. Failed/cancelled
-creation is not recursively removed; inspect the destination before retrying.
-
-## Tests
-
-```bash
-swift test                 # Core parsers, processes and real temporary Git repositories
-./scripts/test.sh          # Xcode core + actual macOS UI tests (interactive desktop)
-```
-
-Tests create isolated temporary repositories and never target the REA repository,
-Fork.app, your existing repositories or your global Git config. UI test screenshots
-and results are retained in ignored `.artifacts/*.xcresult` bundles.
-
-See [docs/VALIDATION.md](docs/VALIDATION.md) for checks actually executed and limitations.
-
-## Project structure
-
-- `Sources/ForkyCore/`: typed Git boundary, parsers, process ownership and operations.
-- `Sources/Forky/`: @MainActor observable state, SwiftUI shell, AppKit history / diff.
-- `Tests/ForkyCoreTests/`: real-Git and boundary regressions.
-- `Tests/ForkyUITests/`: native commit/history, graph/search/split-diff, alphabetic input,
-  filtered staging, local/tracking/historical branches, clone/init, remote publish/sync,
-  stash management, activity and cancellation workflows.
-- `scripts/generate-project.py`: regenerate stable native Xcode project (Python stdlib).
-- `scripts/generate-icon.swift`: regenerate the original icon with AppKit.
-
-The Xcode project uses synchronized groups and the local ForkyCore package.
-Regeneration is not required when adding Swift files to the existing source/test folders.
-
-Forky takes workflow inspiration from Git clients, not their proprietary code, artwork,
-or licensing mechanisms. It is an independent project, not affiliated with Fork.
+Sources/ForkyCore owns typed Git semantics/processes; Sources/Forky owns state/views.
+Xcode owns the app/UI tests, SwiftPM owns Core/tests. Synchronized groups discover new
+Swift files; scripts/generate-project.py reproduces the project, generate-icon.swift the
+original artwork. No proprietary Fork code/assets or licensing behavior is copied.

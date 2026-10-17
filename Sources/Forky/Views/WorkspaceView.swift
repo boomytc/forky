@@ -17,6 +17,7 @@ struct WorkspaceView: View {
                             Label("Repository state is stale. Refresh before making changes.", systemImage: "exclamationmark.triangle")
                                 .font(.callout).foregroundStyle(.orange).padding(10)
                         }
+                        if let warning = store.monitorWarning { Text(warning).font(.caption).foregroundStyle(.orange).padding(6) }
                         OperationStrip(store: store)
                         OperationBanner(store: store)
                         switch store.section {
@@ -49,6 +50,18 @@ struct WorkspaceView: View {
             }
             ToolbarItem(placement: .automatic) { SyncControls(store: store) }
             ToolbarItem(placement: .automatic) {
+                Menu {
+                    ForEach(QueryTool.allCases) { tool in
+                        Button(tool.rawValue) { store.requestQuery(tool) }
+                    }
+                    Divider()
+                    ForEach(ManagementTool.allCases) { tool in
+                        Button(tool.rawValue) { store.requestManagement(tool) }
+                    }
+                } label: { Label("Repository Tools", systemImage: "slider.horizontal.3") }
+                .disabled(!store.canWrite).accessibilityIdentifier("repositoryTools")
+            }
+            ToolbarItem(placement: .automatic) {
                 Button("New Branch", systemImage: "arrow.triangle.branch") { store.requestBranch() }
                     .labelStyle(.iconOnly).help("Create branch at HEAD · ⇧⌘N")
                     .disabled(!store.canWrite || store.snapshot?.head == nil).accessibilityIdentifier("newBranch")
@@ -79,6 +92,8 @@ struct WorkspaceView: View {
             case .creation(let kind): CreationSheet(kind: kind, store: store)
             case .activity: ActivityView(store: store)
             case .advanced(let request): AdvancedSheet(request: request, store: store)
+            case .management(let request): ManagementSheet(request: request, store: store)
+            case .query(let request): QuerySheet(request: request, store: store)
             }
         }
         .alert(store.notice?.title ?? "Git Error", isPresented: Binding(

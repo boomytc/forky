@@ -20,6 +20,7 @@ public struct PatchHunk: Identifiable, Sendable {
 public struct PartialPatch: Sendable {
     let raw: String
     let header: String
+    private let deletesFile: Bool
     public let hunks: [PatchHunk]
     public var changeIDs: Set<Int> { Set(hunks.flatMap { $0.changeIDs }) }
 
@@ -29,19 +30,24 @@ public struct PartialPatch: Sendable {
         guard rows.count <= 20_000 else { throw GitError.invalidInput("This patch exceeds the 20,000-line selection budget. Stage the complete file instead.") }
         guard rows.first?.hasPatchPrefix("diff --git ") == true,
               rows.filter({ $0.hasPatchPrefix("diff --git ") }).count == 1,
-              !rows.contains(where: { row in ["new file mode ", "deleted file mode ", "old mode ", "new mode ", "rename from ", "Binary files ", "GIT binary patch"].contains(where: row.hasPatchPrefix) }),
+              !rows.contains(where: { row in ["old mode ", "new mode ", "rename from ", "Binary files ", "GIT binary patch"].contains(where: row.hasPatchPrefix) }),
               let first = rows.firstIndex(where: { $0.hasPatchPrefix("@@ ") }) else {
-            throw GitError.invalidInput("Line selection supports regular tracked text modifications only, not new/deleted files, mode changes, renames or binary files.")
+            throw GitError.invalidInput("Line selection requires a complete regular text patch; mode changes, renames and binaries need whole-file actions.")
         }
         let headers = rows[..<first]
         let validPaths = [("a/", "b/"), ("b/", "a/")].contains { old, new in
             (headers.contains(where: { $0.hasPatchPrefix("--- " + old) }) && headers.contains(where: { $0.hasPatchPrefix("+++ " + new) }))
                 || (headers.contains(where: { $0.hasPatchPrefix("--- \"" + old) }) && headers.contains(where: { $0.hasPatchPrefix("+++ \"" + new) }))
         }
-        guard validPaths else {
+        let creates = rows.contains(where: { $0.hasPatchPrefix("new file mode ") })
+        let deletes = rows.contains(where: { $0.hasPatchPrefix("deleted file mode ") })
+        let nullPaths = (creates && headers.contains("--- /dev/null") && headers.contains(where: { $0.hasPatchPrefix("+++ ") }))
+            || (deletes && headers.contains("+++ /dev/null") && headers.contains(where: { $0.hasPatchPrefix("--- ") }))
+        guard validPaths || nullPaths else {
             throw GitError.malformedOutput("Unexpected patch paths.")
         }
         self.raw = raw
+        deletesFile = deletes
         header = headers.joined(separator: "\n") + "\n"
         var result: [PatchHunk] = [], index = first, nextID = 0
         while index < rows.count {
@@ -88,7 +94,15 @@ public struct PartialPatch: Sendable {
     /// Unstaging is also a forward patch FROM the index, produced by Git diff -R.
     public func selecting(_ selection: Set<Int>) throws -> String {
         guard !selection.isEmpty, selection.isSubset(of: changeIDs) else { throw GitError.invalidInput("Select changed lines or a complete hunk.") }
-        var output = header, delta = 0
+        var selectedHeader = header
+        if deletesFile && selection != changeIDs {
+            // A subset of a deletion leaves a normal file in the index.
+            let rows = header.components(separatedBy: "\n")
+            guard let old = rows.first(where: { $0.hasPatchPrefix("--- ") }) else { throw GitError.malformedOutput("Missing source path.") }
+            selectedHeader = rows.filter { !$0.hasPatchPrefix("deleted file mode ") && !$0.hasPatchPrefix("index ") }
+                .map { $0 == "+++ /dev/null" ? "+++ " + old.dropFirst(4) : $0 }.joined(separator: "\n")
+        }
+        var output = selectedHeader, delta = 0
         for hunk in hunks where !selection.isDisjoint(with: hunk.changeIDs) {
             var body = "", oldCount = 0, newCount = 0
             for line in hunk.lines {
@@ -122,5 +136,6 @@ public struct PartialReview: Sendable {
     let expected: RepositorySnapshot
     let change: FileChange
     public let side: DiffSide
+    public let writesWorktree: Bool
     public let patch: PartialPatch
 }

@@ -11,6 +11,10 @@ struct ConflictSheet: View {
     @State private var source = 2
     @State private var delete = false
     @State private var allowMarkers = false
+    @State private var document: ConflictDocument?
+    @State private var choices: [Int: ConflictChoice] = [:]
+    @State private var chunkError: String?
+    @State private var confirmTool = false
 
     var body: some View {
         AdvancedFrame(title: "Resolve Conflict", subtitle: file.path.value + " · " + request.expected.root.lastPathComponent) {
@@ -30,6 +34,25 @@ struct ConflictSheet: View {
                     }
                     Text("During rebase, Ours is the new base and Theirs is the replayed commit. Use stage identities, not branch-name guesses.")
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 8)
+                    if let document, !document.chunks.isEmpty {
+                        DisclosureGroup("Conflict chunks (\(document.chunks.count)) · choose each side") {
+                            ScrollView {
+                                LazyVStack {
+                                    ForEach(document.chunks) { chunk in
+                                        HStack {
+                                            Text("Chunk \(chunk.id + 1)").font(.caption)
+                                            Picker("Choice", selection: Binding(get: { choices[chunk.id] ?? .unresolved }, set: { choices[chunk.id] = $0 })) {
+                                                ForEach(ConflictChoice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                            }.labelsHidden()
+                                        }.id(chunk.id)
+                                    }
+                                }
+                            }.frame(maxHeight: 105)
+                            Button("Replace Editor with These Chunk Choices") { text = document.render(choices) }
+                                .help("Explicitly replaces manual edits with this generated result. Unselected chunks keep original markers.")
+                        }.padding(.horizontal, 10)
+                    }
+                    if let chunkError { Text(chunkError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 10) }
                     HSplitView {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("READ-ONLY VERSION").font(.caption2).foregroundStyle(.secondary)
@@ -59,15 +82,25 @@ struct ConflictSheet: View {
                 }
             }
             Spacer()
+            Button("Configured Mergetool…") { confirmTool = true }
+                .disabled(review == nil || !store.canWrite || text != (review?.working ?? ""))
+                .help("Runs trusted Git-configured code; may modify and stage this file. Review tool configuration first.")
             Button("Save Worktree Only") { save(stage: false) }.disabled(review == nil || !store.canWrite || delete).accessibilityIdentifier("conflictSave")
             Button(delete ? "Delete & Stage Resolution" : "Save & Stage Resolution") { save(stage: true) }
                 .buttonStyle(.borderedProminent).disabled(review == nil || !store.canWrite).accessibilityIdentifier("conflictStage")
         }
+        .confirmationDialog("Run the Git-configured mergetool?", isPresented: $confirmTool) {
+            Button("Run Configured Tool") {
+                guard let review else { return }
+                store.performAdvanced(request, title: "Running explicitly configured mergetool…") { try await $0.runMergetool(review) }
+            }
+        } message: { Text("This executes trusted Git-configured code and may modify/stage this file. Save or discard manual editor edits first. No tool is installed.") }
         .task {
             do {
                 let value = try await request.repository.reviewConflict(file.path, expected: request.expected)
                 try Task.checkCancellation()
                 review = value
+                do { document = try ConflictDocument(value.working ?? "") } catch { chunkError = error.localizedDescription }
                 text = store.editDrafts[store.conflictDraftKey(request, path: file.path)] ?? value.working ?? ""
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }

@@ -5,9 +5,17 @@ struct RebaseSheet: View {
     let request: AdvancedRequest
     let base: GitCommit
     let store: RepositoryStore
+    var initialOntoID = ""
     @State private var plan: RebasePlan?
     @State private var items: [RebaseItem] = []
     @State private var ontoID = ""
+    @State private var backup = false
+    @State private var backupName = ""
+    @State private var updateRefs = false
+    @State private var original: [GitCommit] = []
+    @State private var originalGraph = CommitGraph.empty
+    @State private var inspectedOID: String?
+    @State private var inputWarning: String?
     @State private var acknowledged = false
     @State private var error: String?
     private var targets: [GitReference] { request.expected.references.filter { $0.symbolicTarget == nil && $0.kind != .tag && !$0.isCurrent } }
@@ -25,6 +33,25 @@ struct RebaseSheet: View {
                     }.padding(10)
                     Text("Top to bottom = replay order. Edit pauses for staged changes / rewording. Squash keeps combined messages; fixup keeps the earlier message.")
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 8)
+                    DisclosureGroup("Original graph / commit details (not a prediction of rewritten OIDs)") {
+                        CommitTable(commits: original, graph: originalGraph, decorations: [:], selection: $inspectedOID,
+                                    canExecute: { _, _ in false }, execute: { _, _ in }, showsMenu: false, accessibilityID: "rebaseOriginalGraph")
+                            .frame(height: 100)
+                        if let selected = original.first(where: { $0.id == inspectedOID }) {
+                            Text(selected.subject + "\n" + selected.body).font(.caption).textSelection(.enabled).lineLimit(5)
+                        }
+                    }.padding(.horizontal, 10)
+                    HStack {
+                        Toggle("Create lightweight backup tag", isOn: $backup)
+                        if backup { TextField("New backup tag", text: $backupName).textFieldStyle(.roundedBorder) }
+                        Toggle("Update other eligible refs", isOn: $updateRefs)
+                    }.font(.caption).padding(.horizontal, 10)
+                    if updateRefs {
+                        Text("May update local branches pointing into this range; Git excludes checked-out worktree branches: " +
+                             request.expected.branches.filter { ref in ref.kind == .localBranch && items.contains { $0.id == ref.commitOID } }.map(\.fullName).joined(separator: ", "))
+                            .font(.caption2).foregroundStyle(.orange).padding(.horizontal, 10)
+                    }
+                    if let inputWarning { Text(inputWarning).font(.caption).foregroundStyle(.orange) }
                     List {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             HStack(spacing: 10) {
@@ -50,17 +77,27 @@ struct RebaseSheet: View {
             Spacer()
             Text("Clean worktree · linear range · ≤200 commits").font(.caption).foregroundStyle(.secondary)
             Button("Start Rebase") {
+                guard FormEditing.finish() else { acknowledged = false; inputWarning = FormEditing.reviewMessage; return }
                 guard let plan else { return }
                 let rows = items, onto = targets.first { $0.id == ontoID }
-                store.performAdvanced(request, title: "Interactive rebase · reviewed plan…") { try await $0.startRebase(plan, items: rows, onto: onto) }
-            }.buttonStyle(.borderedProminent).disabled(plan == nil || !acknowledged || !store.canEditHistory).accessibilityIdentifier("rebaseConfirm")
+                var options = RebaseOptions(); options.backupTag = backup ? backupName : nil; options.updateReferences = updateRefs
+                let captured = options
+                store.performAdvanced(request, title: "Interactive rebase · reviewed plan…") { try await $0.startRebase(plan, items: rows, onto: onto, options: captured) }
+            }.buttonStyle(.borderedProminent).disabled(plan == nil || !acknowledged || !store.canEditHistory || (backup && backupName.isEmpty)).accessibilityIdentifier("rebaseConfirm")
         }
         .task {
             do {
                 let value = try await request.repository.rebasePlan(after: base.oid, expected: request.expected)
                 try Task.checkCancellation(); plan = value; items = value.items
+                ontoID = initialOntoID
+                original = value.items.reversed().map(\.commit); originalGraph = CommitGraph(commits: original)
+                backupName = "forky-backup-" + String((request.expected.head ?? "").prefix(8))
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
+        .onChange(of: ontoID) { _, _ in acknowledged = false }
+        .onChange(of: backup) { _, _ in acknowledged = false }
+        .onChange(of: backupName) { _, _ in acknowledged = false }
+        .onChange(of: updateRefs) { _, _ in acknowledged = false }
     }
 }
 
@@ -84,6 +121,10 @@ struct OperationSheet: View {
                         Text("Continue commits explicitly staged resolutions. Skip omits the current commit. Skip/Abort can discard tracked edits and obstructing paths; inspect the complete changed scope below. Neither action is a general rollback.")
                             .font(.callout)
                         if !ready { Label("Resolve conflicts and stage tracked worktree edits before continuing.", systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange) }
+                        ForEach(review.snapshot.operation.referenceUpdates) { update in
+                            Text("Final ref update: " + update.name + " · " + (update.oldOID ?? "(new)") + " → " + (update.newOID ?? "(pending replay)"))
+                                .font(.system(.caption, design: .monospaced)).foregroundStyle(.orange).textSelection(.enabled)
+                        }
                         if let branch = review.snapshot.operation.branchRef {
                             Text("Original branch: " + branch).font(.system(.caption, design: .monospaced))
                         }

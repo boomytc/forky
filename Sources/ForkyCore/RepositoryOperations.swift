@@ -27,11 +27,11 @@ extension GitRepository {
                                      configurationDigest: config.digest, credentials: config.credentials)
     }
 
-    private func readStashes() async throws -> [GitStash] {
+    func readStashes() async throws -> [GitStash] {
         try GitParsers.stashes(try await command(["stash", "list", "-z", "--format=%H%x00%gd%x00%ct%x00%gs"]).stdout)
     }
 
-    private func collaboration(_ snapshot: RepositorySnapshot) throws -> CollaborationSnapshot {
+    func collaboration(_ snapshot: RepositorySnapshot) throws -> CollaborationSnapshot {
         guard let value = snapshot.collaboration.value else {
             throw GitError.invalidInput("Repository tools metadata is unavailable. " + (snapshot.collaboration.error ?? "Refresh before retrying."))
         }
@@ -48,7 +48,7 @@ extension GitRepository {
         return fresh
     }
 
-    private func checkedRemote(_ remote: GitRemote, expected: RepositorySnapshot, fresh: RepositorySnapshot) throws -> CollaborationSnapshot {
+    func checkedRemote(_ remote: GitRemote, expected: RepositorySnapshot, fresh: RepositorySnapshot) throws -> CollaborationSnapshot {
         let old = try collaboration(expected), current = try collaboration(fresh)
         guard current.configurationDigest == old.configurationDigest, current.remotes.contains(remote) else {
             throw GitError.staleRepository
@@ -57,14 +57,14 @@ extension GitRepository {
         return current
     }
 
-    private func transport(_ args: [String], metadata: CollaborationSnapshot) async throws {
+    func transport(_ args: [String], metadata: CollaborationSnapshot) async throws {
         do { _ = try await command(args, write: true, network: true) }
         catch GitError.commandFailed(let code, let text) {
             throw GitError.commandFailed(code, TransportPresentation.sanitize(text, using: metadata.credentials))
         }
     }
 
-    private func fetchArguments(_ remote: GitRemote) -> [String] {
+    func fetchArguments(_ remote: GitRemote) -> [String] {
         ["fetch", "--no-progress", "--no-tags", "--no-prune", "--no-prune-tags",
          "--no-recurse-submodules", "--no-auto-maintenance", "--no-write-commit-graph", "--", remote.name]
     }
@@ -173,27 +173,40 @@ extension GitRepository {
         }
     }
 
-    public func applyStash(_ stash: GitStash, restoreIndex: Bool, expected: RepositorySnapshot) async throws {
+    public func applyStash(_ stash: GitStash, restoreIndex: Bool, expected: RepositorySnapshot, dropAfterSuccess: Bool = false) async throws {
         try await gate.withPermit {
             let fresh = try await reviewed(expected, clean: true)
             guard GitParsers.isOID(stash.oid), try collaboration(fresh).stashes.contains(where: { $0.oid == stash.oid }) else {
                 throw GitError.staleStash
             }
+            let commit = try await readCommit(stash.oid)
+            guard (2...3).contains(commit.parents.count), let head = fresh.head else { throw GitError.invalidInput("Unknown stash topology or unborn destination.") }
+            try await protectIgnored(revisions: Array(commit.parents.dropFirst(2)), transitions: [(head, stash.oid)])
             _ = try await command(["-c", "submodule.recurse=false", "stash", "apply"]
                                   + (restoreIndex ? ["--index"] : []) + [stash.oid], write: true)
+            if dropAfterSuccess {
+                do { try await dropReviewedStash(stash, expected: collaboration(fresh).stashes) }
+                catch is CancellationError { throw CancellationError() }
+                catch { throw GitError.invalidInput("Stash apply succeeded; deletion did not complete. Inspect the retained list before retrying. " + error.localizedDescription) }
+            }
         }
     }
 
     public func dropStash(_ stash: GitStash, expected: RepositorySnapshot) async throws {
         try await gate.withPermit {
             guard expected.root == root else { throw GitError.staleRepository }
-            let current = try await readStashes()
-            guard current == (try collaboration(expected)).stashes, current.contains(stash) else { throw GitError.staleStash }
-            // Selector is owner-parsed and checked against its OID immediately before deletion.
-            let resolved = try await command(["rev-parse", "--verify", stash.selector])
-            guard try GitParsers.string(resolved.stdout).trimmingCharacters(in: .newlines) == stash.oid else { throw GitError.staleStash }
-            _ = try await command(["stash", "drop", "--", stash.selector], write: true)
+            try await dropReviewedStash(stash, expected: collaboration(expected).stashes)
         }
+    }
+
+    func dropReviewedStash(_ stash: GitStash, expected: [GitStash]) async throws {
+        let current = try await readStashes()
+        guard current == expected, current.contains(stash) else { throw GitError.staleStash }
+        let resolved = try await command(["rev-parse", "--verify", stash.selector])
+        var oid = try GitParsers.string(resolved.stdout)
+        if oid.hasSuffix("\n") { oid.removeLast() }
+        guard oid == stash.oid else { throw GitError.staleStash }
+        _ = try await command(["stash", "drop", "--", stash.selector], write: true)
     }
 
     public func stashDiff(_ stash: GitStash) async throws -> String {

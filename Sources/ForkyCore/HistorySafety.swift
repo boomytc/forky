@@ -14,7 +14,7 @@ extension GitRepository {
         let ignored = try paths(ignoredData)
         var changed = additional
         if !revisions.isEmpty {
-            let data = try await command(["log", "--no-walk", "--format=", "--name-only", "-z",
+            let data = try await command(["log", "-m", "--no-walk", "--format=", "--name-only", "-z",
                 "--no-ext-diff", "--no-textconv", "--no-renames", "--no-notes", "--no-show-signature", "--no-decorate", "--root"] + revisions + ["--"]).stdout
             changed += try paths(data)
         }

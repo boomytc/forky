@@ -20,7 +20,7 @@ extension RepositoryStore {
         case .tree, .copySHA, .copyMessage: !isBusy
         case .branch: canWrite
         case .rebase: canEditHistory && commit.oid != snapshot?.head
-        case .cherryPick, .revert: canEditHistory && commit.parents.count <= 1
+        case .cherryPick, .revert: canEditHistory
         }
     }
     func executeHistory(_ command: HistoryCommand, commit: GitCommit) {

@@ -6,7 +6,7 @@ There is no promise of rollback or atomicity against another Git client.
 
 ## Lines and hunks
 
-Changes → select a regular modified tracked file → **Stage Lines…** or
+Changes → select a regular modified, new or deleted text file → **Stage Lines…** or
 **Unstage Lines…**. Select individual changed lines, Select Hunk, or Select All, then
 confirm. Only the index is changed; worktree bytes are not rewritten.
 
@@ -20,8 +20,10 @@ A complete canonical Git patch is parsed at its LF-byte boundary, not from the
 markers are retained. The original HEAD/index and exact patch are checked again;
 Git checks the resulting index patch before applying it.
 
-Current scope: regular tracked modifications only. New/deleted files, renames,
-symlinks, submodules, binaries and mode changes use whole-file actions/external tools.
+Current scope: regular modified/new/deleted text. Renames, symlinks, submodules,
+binaries and mode changes use whole-file actions/external tools. Inline Staging Review
+uses the same Core patch contract; Discard Working Lines has its own reverse preview
+and explicit destructive approval, never an index-only shortcut.
 The interactive selection budget is 20,000 patch lines, not a claim of complete preview
 after truncation. Oversized or malformed input refuses partial application.
 
@@ -53,7 +55,8 @@ directories are not automatically recreated.
 
 Right-click a commit or use its detail menu. Confirm its full OID, current repository
 and branch. Cherry-pick replays it; Revert creates an inverse commit, not a reset.
-A clean local branch is required. Merge commits refuse until a mainline UI exists.
+A clean local branch is required. Merge commits require selecting the intended
+mainline parent. No-commit and cherry-pick source annotation are explicit options.
 
 If Git pauses on conflict, resolve/stage paths, then use the operation banner.
 Continue commits explicitly staged content. Skip omits the current commit; Abort
@@ -71,7 +74,8 @@ Select an ancestor **before** the commits to edit → **Interactive Rebase After
 - Every original commit remains exactly once as an explicit command, including drop.
   Squash/fixup needs a preceding kept commit; dropping everything is refused.
 - Acknowledge rewriting commit identities, including possibly published commits.
-  No force push, autostash, autosquash or automatic updates to other branches follows.
+  No force push, autostash or autosquash follows. Update References is opt-in and
+  lists eligible captured refs; a separate lightweight backup tag is outside that update set.
 - Edit/reword pauses. Stage intended changes, open Review Operation, edit the message,
   **Amend Paused Commit**, reopen the review, then **Continue**.
 - Squash accepts combined default messages; fixup keeps the earlier message. To
@@ -109,4 +113,5 @@ source filename presentation). Historical filename presentation is never a looku
 
 Blame output and blobs use the process output budget; blame additionally caps 20,000
 rows. Oversized results are unavailable rather than silently incomplete. There is
-no syntax highlighting, word-level attribution or file-history navigation yet.
+no syntax highlighting or word-level attribution. File History follows recorded rename
+paths; blame SHA buttons navigate to commits, and Back restores the prior context.

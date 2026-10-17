@@ -6,6 +6,7 @@ struct TreeSheet: View {
     let request: AdvancedRequest
     let commit: GitCommit
     let store: RepositoryStore
+    var embedded = false
     @State private var folders: [GitTreeEntry] = []
     @State private var entries: [GitTreeEntry] = []
     @State private var selectedID: String?
@@ -17,13 +18,43 @@ struct TreeSheet: View {
     @State private var loading = true
     private var selected: GitTreeEntry? { entries.first { $0.id == selectedID } }
     var body: some View {
-        AdvancedFrame(title: "File Tree / Blame", subtitle: commit.shortOID + " · " + commit.subject + " · immutable commit, not working files") {
+        Group {
+            if embedded { treeContent }
+            else {
+                AdvancedFrame(title: "File Tree / Blame", subtitle: commit.shortOID + " · " + commit.subject + " · immutable commit, not working files") {
+                    treeContent
+                } actions: { treeFooter }
+            }
+        }
+        .task(id: folders.last?.oid) {
+            loading = true; error = nil; entries = []; selectedID = nil
+            do {
+                let value = try await request.repository.tree(in: commit, directory: folders.last)
+                try Task.checkCancellation(); entries = value; loading = false
+            } catch is CancellationError {} catch { self.error = error.localizedDescription; loading = false }
+        }
+        .task(id: (selectedID ?? "") + (blame ? ":blame" : ":source")) {
+            preview = nil; lines = nil; fileError = nil
+            guard let selected, selected.kind == .blob else { return }
+            do {
+                if blame {
+                    let value = try await request.repository.blame(selected); try Task.checkCancellation(); lines = value
+                } else {
+                    let value = try await request.repository.blob(selected); try Task.checkCancellation(); preview = value
+                }
+            } catch is CancellationError {} catch { fileError = error.localizedDescription }
+        }
+    }
+    private var treeContent: some View {
             VStack(spacing: 0) {
                 HStack {
                     Button("Root") { folders = [] }.disabled(folders.isEmpty)
                     Button("Up", systemImage: "chevron.up") { _ = folders.popLast() }.disabled(folders.isEmpty)
                     Text(folders.last?.path.value ?? "/").font(.system(.caption, design: .monospaced)).lineLimit(1)
                     Spacer()
+                    Button("File History") {
+                        if let selected { store.requestQuery(.fileHistory, path: selected.path, oid: commit.oid) }
+                    }.disabled(selected?.kind != .blob).accessibilityIdentifier("treeFileHistory")
                     Toggle("Blame", isOn: $blame).toggleStyle(.button)
                         .disabled(selected?.kind != .blob || selected?.isSymlink == true).accessibilityIdentifier("showBlame")
                 }.padding(10)
@@ -56,7 +87,8 @@ struct TreeSheet: View {
                                 HStack(alignment: .top, spacing: 12) {
                                     Text("\(line.line)").frame(width: 40, alignment: .trailing).foregroundStyle(.tertiary)
                                     VStack(alignment: .leading) {
-                                        Text(String(line.oid.prefix(8))).font(.system(.caption, design: .monospaced))
+                                        Button(String(line.oid.prefix(8))) { store.revealCommit(line.oid) }
+                                            .buttonStyle(.borderless).font(.system(.caption, design: .monospaced))
                                         Text(line.author + " · " + line.date.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                     }.frame(width: 125, alignment: .leading)
                                     Text(line.text).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
@@ -72,28 +104,13 @@ struct TreeSheet: View {
                     }.frame(minWidth: 330, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-        } actions: {
+    }
+    private var treeFooter: some View {
+        HStack {
+
             Text(commit.oid).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
             Spacer()
             Button("Done") { store.sheet = nil }.keyboardShortcut(.cancelAction).accessibilityIdentifier("treeDone")
-        }
-        .task(id: folders.last?.oid) {
-            loading = true; error = nil; entries = []; selectedID = nil
-            do {
-                let value = try await request.repository.tree(in: commit, directory: folders.last)
-                try Task.checkCancellation(); entries = value; loading = false
-            } catch is CancellationError {} catch { self.error = error.localizedDescription; loading = false }
-        }
-        .task(id: (selectedID ?? "") + (blame ? ":blame" : ":source")) {
-            preview = nil; lines = nil; fileError = nil
-            guard let selected, selected.kind == .blob else { return }
-            do {
-                if blame {
-                    let value = try await request.repository.blame(selected); try Task.checkCancellation(); lines = value
-                } else {
-                    let value = try await request.repository.blob(selected); try Task.checkCancellation(); preview = value
-                }
-            } catch is CancellationError {} catch { fileError = error.localizedDescription }
         }
     }
 }

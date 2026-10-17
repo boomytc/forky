@@ -50,6 +50,11 @@ struct ActivityView: View {
                     }.padding(.vertical, 6)
                 }.listStyle(.inset)
             }
+            if let diagnostic = store.latestDiagnostic {
+                DisclosureGroup("Full latest operation diagnostics (bounded process output)") {
+                    SourceTextView(text: diagnostic, identifier: "fullOperationDiagnostic").frame(height: 160)
+                }.font(.caption)
+            }
             Divider()
             HStack {
                 if store.canCancelOperation { Button("Cancel Git Operation", action: store.cancelOperation) }

@@ -3,16 +3,17 @@ import SwiftUI
 
 @main
 struct ForkyApp: App {
-    @State private var store = RepositoryStore()
+    @State private var hub = WorkspaceHub()
+    private var store: RepositoryStore { hub.selected.store }
     @NSApplicationDelegateAdaptor(ForkyAppDelegate.self) private var delegate
 
     var body: some Scene {
         Window("Forky", id: "main") {
-            WorkspaceView(store: store)
+            WorkspaceTabs(hub: hub)
                 .frame(minWidth: 980, minHeight: 640)
                 .tint(ForkyTheme.accent)
                 .task {
-                    delegate.store = store
+                    delegate.hub = hub
                     store.bootstrap()
                 }
         }
@@ -20,6 +21,8 @@ struct ForkyApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {
+                Button("New Repository Tab") { hub.newTab() }.keyboardShortcut("t")
+                Button("Reopen Closed Tab") { hub.reopen() }.keyboardShortcut("t", modifiers: [.command, .shift]).disabled(hub.closed.isEmpty)
                 Button("Open Repository…", action: store.chooseRepository)
                     .keyboardShortcut("o")
                     .disabled(store.isMutating)
@@ -30,6 +33,11 @@ struct ForkyApp: App {
                 Button("Refresh Repository", action: store.refresh)
                     .keyboardShortcut("r")
                     .disabled(store.repository == nil || store.isBusy)
+            }
+            CommandMenu("Tools") {
+                ForEach(QueryTool.allCases) { tool in Button(tool.rawValue) { store.requestQuery(tool) }.disabled(store.repository == nil || store.isMutating) }
+                Divider()
+                ForEach(ManagementTool.allCases) { tool in Button(tool.rawValue) { store.requestManagement(tool) }.disabled(!store.canWrite) }
             }
             CommandMenu("Repository") {
                 Button("Working Changes") { store.navigate(.changes) }.keyboardShortcut("1")
@@ -62,9 +70,9 @@ struct ForkyApp: App {
 
 @MainActor
 final class ForkyAppDelegate: NSObject, NSApplicationDelegate {
-    weak var store: RepositoryStore?
+    weak var hub: WorkspaceHub?
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard store?.isMutating == true else { return .terminateNow }
+        guard hub?.isWriting == true else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "A Git write is still running"
         alert.informativeText = "Wait for the operation and repository refresh to finish before quitting."

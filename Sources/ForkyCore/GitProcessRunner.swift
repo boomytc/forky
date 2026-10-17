@@ -26,7 +26,12 @@ public struct GitProcessRunner: Sendable {
         self.outputLimit = outputLimit
     }
 
-    /// Retains this caller's executable and isolated environment, not the current ambient environment.
+    /// Selected helper, preserving this caller's already isolated environment and resource budget.
+    func usingExecutable(_ executable: URL, timeout: TimeInterval) -> Self {
+        Self(executable: executable, environment: environment, timeout: timeout, outputLimit: outputLimit)
+    }
+
+    /// Retains executable/environment identity when changing only the deadline.
     func withTimeout(_ timeout: TimeInterval) -> Self {
         Self(executable: executable, environment: environment, timeout: timeout, outputLimit: outputLimit)
     }

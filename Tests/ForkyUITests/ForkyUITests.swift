@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 
 @MainActor
 final class ForkyUITests: XCTestCase {
@@ -543,6 +544,188 @@ final class ForkyUITests: XCTestCase {
         app.menuItems["Browse Tree / Blame…"].click()
         XCTAssertTrue(app.sheets.staticTexts[root].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["treeDone"].click()
+    }
+
+    func testExternalChangesRefreshWithoutManualRefresh() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        try Data("external".utf8).write(to: fixture.appendingPathComponent("external.txt"))
+        let stage = app.buttons["stage:external.txt"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 15), app.debugDescription)
+        waitFor(NSPredicate(format: "enabled == true"), object: stage)
+        capture("Complete — automatic filesystem refresh")
+    }
+
+    func testNormalAmendMessageOnly() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click()
+        app.menuItems["Amend / Reword HEAD"].click()
+        let editor = app.textViews["amendMessage"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10), app.debugDescription)
+        waitFor(NSPredicate(format: "value CONTAINS %@", "Create UI fixture"), object: editor)
+        editor.click(); editor.typeKey("a", modifierFlags: .command)
+        for key in "amended" { editor.typeKey(String(key), modifierFlags: .shift) }
+        editor.typeKey(.return, modifierFlags: []) // commit composition, never change input source
+        app.checkBoxes["managementApprove"].click()
+        let confirm = app.windows.buttons["managementConfirm"]
+        waitFor(NSPredicate(format: "enabled == true"), object: confirm)
+        capture("Complete — normal message-only amend")
+        confirm.click()
+        XCTAssertTrue(app.buttons["refreshRepository"].waitForExistence(timeout: 10))
+        waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["refreshRepository"], timeout: 20)
+        XCTAssertEqual(try git(["log", "-1", "--format=%s"]).trimmingCharacters(in: .newlines), "AMENDED")
+        XCTAssertEqual(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8), "# Forky UI fixture\n")
+    }
+
+    func testRepositoryTabsKeepIndependentSessions() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        app.buttons["newRepositoryTab"].click()
+        XCTAssertTrue(app.buttons["welcomeOpenRepository"].waitForExistence(timeout: 5), app.debugDescription)
+        let original = app.buttons["Orbit"].firstMatch
+        XCTAssertTrue(original.exists, app.debugDescription); original.click()
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        waitFor(NSPredicate(format: "value == %@ OR label == %@", "main", "main"), object: app.staticTexts["currentBranch"])
+        capture("Complete — independent repository tabs")
+    }
+
+    func testCreateTagFromManagement() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click(); app.menuItems["Branches, Tags & Remotes"].click()
+        let picker = app.popUpButtons["referenceEditMode"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 8), app.debugDescription)
+        picker.click()
+        capture("Complete — reference action menu")
+        let createTag = app.menuItems["Create Tag"]
+        XCTAssertTrue(createTag.waitForExistence(timeout: 5), app.debugDescription)
+        createTag.click()
+        typeUppercase("UITAG", into: app.textFields["referenceNewName"])
+        app.checkBoxes["managementApprove"].click()
+        app.windows.buttons["managementConfirm"].click()
+        let ref = app.descendants(matching: .any).matching(identifier: "ref:refs/tags/UITAG").firstMatch
+        XCTAssertTrue(ref.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(try git(["rev-parse", "refs/tags/UITAG"]), try git(["rev-parse", "HEAD"]))
+        capture("Complete — managed tag lifecycle")
+    }
+
+    func testStartReviewedNoFastForwardMerge() throws {
+        try prepare(rich: true, modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click(); app.menuItems["Merge into Current Branch"].click()
+        let ref = app.popUpButtons["managementReference"]
+        XCTAssertTrue(ref.waitForExistence(timeout: 8), app.debugDescription)
+        ref.click(); app.menuItems["refs/heads/feature/split-diff"].click()
+        app.popUpButtons["mergeMode"].click(); app.menuItems["Always create merge commit"].click()
+        app.checkBoxes["managementApprove"].click(); app.windows.buttons["managementConfirm"].click()
+        app.buttons["showActivity"].click()
+        let completed = app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "Completed. Repository state checked.", "Completed. Repository state checked.")).firstMatch
+        XCTAssertTrue(completed.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(try git(["rev-list", "--parents", "-1", "HEAD"]).split(separator: " ").count, 3)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.appendingPathComponent("Diff.swift").path))
+        capture("Complete — proactive no-ff merge")
+    }
+
+    func testSelectedFilesStashThroughTools() throws {
+        try prepare()
+        XCTAssertTrue(app.buttons["stage:README.md"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click(); app.menuItems["Selected Stash / Rename / Pop"].click()
+        let selected = app.sheets.checkBoxes["README.md"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10), app.debugDescription)
+        selected.click()
+        typeUppercase("SELECTED", into: app.sheets.textFields["Message / new name"])
+        app.sheets.checkBoxes["extendedApprove"].click()
+        let apply = app.windows.buttons["extendedConfirm"]
+        waitFor(NSPredicate(format: "enabled == true"), object: apply); apply.click()
+        XCTAssertTrue(app.staticTexts["All caught up"].waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(try git(["status", "--porcelain"]), "")
+        XCTAssertTrue(try git(["stash", "list"]).contains("SELECTED"))
+    }
+
+    func testFileHistoryQueryUsesCapturedPath() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click(); app.menuItems["File History"].click()
+        let path = app.textFields["queryPath"]
+        XCTAssertTrue(path.waitForExistence(timeout: 10), app.debugDescription)
+        path.click()
+        for key in "readme" { path.typeKey(String(key), modifierFlags: .shift) }
+        for key in ".md" { path.typeKey(String(key), modifierFlags: []) }
+        path.typeKey(.return, modifierFlags: [])
+        app.sheets.buttons["Load History"].click()
+        let commit = app.sheets.staticTexts["Create UI fixture"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 15), app.debugDescription)
+        capture("Complete — captured file history")
+        app.sheets.buttons["Show Commit"].firstMatch.click()
+        XCTAssertTrue(app.tables["commitTable"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Back"].click()
+        XCTAssertTrue(app.staticTexts["All caught up"].waitForExistence(timeout: 10), app.debugDescription)
+    }
+
+    func testStatisticsComputeRealFixtureCounts() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click(); app.menuItems["Commit Statistics"].click()
+        let total = app.sheets.staticTexts.matching(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "1 unique reachable", "1 unique reachable")).firstMatch
+        XCTAssertTrue(total.waitForExistence(timeout: 15), app.debugDescription)
+        capture("Complete — local commit statistics")
+    }
+
+    func testInlinePatchUsesExactIndexOnlySelection() throws {
+        try prepare()
+        let stage = app.buttons["stage:README.md"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 10))
+        app.menuButtons["diffTools"].click(); app.menuItems["Inline Staging Review"].click()
+        let line = app.checkBoxes.matching(NSPredicate(format: "identifier BEGINSWITH %@", "inlinePatchLine:")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 10), app.debugDescription); line.click()
+        app.buttons["Apply Selected Lines"].click()
+        XCTAssertTrue(app.buttons["unstage:README.md"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(try git(["diff", "--cached"]).contains("A visible change"))
+        XCTAssertTrue(try String(contentsOf: fixture.appendingPathComponent("README.md"), encoding: .utf8).contains("A visible change"))
+        capture("Complete — exact inline staging")
+    }
+
+    func testHardResetNeedsSeparateDiscardApproval() throws {
+        try prepare()
+        XCTAssertTrue(app.buttons["stage:README.md"].waitForExistence(timeout: 10))
+        app.menuBarItems["Tools"].click(); app.menuItems["Reset Current Branch (Reviewed)"].click()
+        clickSegment("hard")
+        let confirm = app.windows.buttons["resetConfirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        XCTAssertFalse(confirm.isEnabled)
+        app.checkBoxes["resetApprove"].click()
+        XCTAssertFalse(confirm.isEnabled)
+        app.checkBoxes["hardDiscard"].click()
+        waitFor(NSPredicate(format: "enabled == true"), object: confirm)
+        capture("Complete — separately approved hard reset")
+        confirm.click()
+        XCTAssertTrue(app.staticTexts["All caught up"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(try git(["status", "--porcelain"]), "")
+    }
+
+    func testImageComparisonDecodesOwnedFixtureBytes() throws {
+        try prepare(modified: false)
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 10))
+        let image = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let color = NSColor(deviceRed: 0.1, green: 0.8, blue: 0.2, alpha: 1)
+        for x in 0..<4 { for y in 0..<4 { image.setColor(color, atX: x, y: y) } }
+        let pixel = try XCTUnwrap(image.colorAt(x: 0, y: 0)?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(pixel.greenComponent, 0.7); XCTAssertGreaterThan(pixel.alphaComponent, 0.99)
+        let bytes = try XCTUnwrap(image.representation(using: .png, properties: [:]))
+        try bytes.write(to: fixture.appendingPathComponent("pixel.png"))
+        XCTAssertTrue(app.buttons["stage:pixel.png"].waitForExistence(timeout: 15))
+        app.menuBarItems["Tools"].click(); app.menuItems["Image Comparison"].click()
+        XCTAssertTrue(app.staticTexts["imageCaptureComplete"].waitForExistence(timeout: 15), app.debugDescription)
+        let decoded = app.images["comparisonImage:After"]
+        XCTAssertTrue(decoded.waitForExistence(timeout: 10), app.debugDescription)
+        let dimensions = app.staticTexts["imageDimensions:After"]
+        XCTAssertTrue((dimensions.label + (dimensions.value as? String ?? "")).contains("4×4"), app.debugDescription)
+        capture("Complete — bounded image comparison")
+        clickSegment("Swipe"); XCTAssertTrue(decoded.exists)
+        clickSegment("Onion Skin"); XCTAssertTrue(decoded.exists)
     }
 
     private func prepareMergeConflict() throws {

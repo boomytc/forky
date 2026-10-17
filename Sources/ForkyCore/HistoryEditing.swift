@@ -9,16 +9,20 @@ public struct OperationReview: Sendable {
 }
 
 extension GitRepository {
-    public func applyCommit(_ commit: GitCommit, action: CommitAction, expected: RepositorySnapshot) async throws {
-        guard GitParsers.isOID(commit.oid), commit.parents.count <= 1 else {
-            throw GitError.invalidInput("Merge commits need an explicit mainline policy; this action supports non-merge commits only.")
+    public func applyCommit(_ commit: GitCommit, action: CommitAction, expected: RepositorySnapshot, options: CommitApplyOptions = .init()) async throws {
+        guard GitParsers.isOID(commit.oid), commit.parents.count <= 1 || (options.mainline.map { (1...commit.parents.count).contains($0) } ?? false) else {
+            throw GitError.invalidInput("Choose the explicit mainline parent of this merge commit.")
         }
+        guard options.mainline == nil || commit.parents.count > 1 else { throw GitError.invalidInput("Mainline is only applicable to a merge commit.") }
         try await gate.withPermit {
             let fresh = try await checkReviewed(expected, clean: true)
             guard fresh.head != nil, fresh.branch != nil else { throw GitError.invalidInput("Checkout a local branch before changing history.") }
             try await protectIgnored(revisions: [commit.oid])
+            var flags = options.mainline.map { ["--mainline", String($0)] } ?? []
+            if !options.createCommit { flags += ["--no-commit"] }
+            if action == .cherryPick && options.appendSource && options.createCommit { flags += ["-x"] }
             _ = try await command(["-c", "submodule.recurse=false", action == .cherryPick ? "cherry-pick" : "revert", "--no-edit",
-                                   "--no-rerere-autoupdate", commit.oid], write: true, timeout: 300)
+                                   "--no-rerere-autoupdate"] + flags + [commit.oid], write: true, timeout: 300)
         }
     }
 
@@ -44,7 +48,7 @@ extension GitRepository {
         }
     }
 
-    public func startRebase(_ plan: RebasePlan, items: [RebaseItem], onto: GitReference? = nil) async throws {
+    public func startRebase(_ plan: RebasePlan, items: [RebaseItem], onto: GitReference? = nil, options: RebaseOptions = .init()) async throws {
         guard plan.root == root, items.count == plan.items.count,
               Set(items.map(\.id)) == Set(plan.items.map(\.id)), Set(items.map(\.id)).count == items.count else { throw GitError.invalidInput("Every reviewed commit must occur exactly once in the plan.") }
         var kept = false
@@ -55,6 +59,7 @@ extension GitRepository {
         guard kept else { throw GitError.invalidInput("Keep at least one commit. Dropping the entire range is not supported.") }
         try await gate.withPermit {
             let fresh = try await checkReviewed(plan.expected, clean: true)
+            if options.updateReferences && fresh.references != plan.expected.references { throw GitError.staleRepository }
             let target: String
             if let onto {
                 guard fresh.references.contains(onto), onto.symbolicTarget == nil else { throw GitError.staleRepository }
@@ -64,20 +69,31 @@ extension GitRepository {
             } else { target = plan.baseOID }
             guard let oldHead = fresh.head else { throw GitError.staleRepository }
             try await protectIgnored(revisions: items.filter { $0.command != .drop }.map(\.id), transitions: [(oldHead, target)])
-            let todo = items.map { $0.command.rawValue + " " + $0.commit.oid + "\n" }.joined()
+            if let name = options.backupTag {
+                guard !name.isEmpty, !name.hasPrefix("-"), !name.utf8.contains(0) else { throw GitError.invalidBranchName }
+                _ = try await command(["check-ref-format", "refs/tags/" + name])
+                // A backup tag is deliberately outside --update-refs branch rewriting.
+                _ = try await command(["update-ref", "--create-reflog", "-m", "Forky approved pre-rebase backup", "refs/tags/" + name, oldHead, String(repeating: "0", count: oldHead.count)], write: true)
+            }
+            let occupied = options.updateReferences ? Set(try await readWorktrees().compactMap(\.branch)) : []
+            let eligible = fresh.branches.filter { $0.kind == .localBranch && !$0.isCurrent && !occupied.contains($0.fullName) }
+            let todo = items.map { item in
+                let updates = options.updateReferences ? eligible.filter { $0.commitOID == item.id }.map { "update-ref " + $0.fullName + "\n" }.joined() : ""
+                return item.command.rawValue + " " + item.commit.oid + "\n" + updates
+            }.joined()
             try await TemporaryInput.withFile(Data(todo.utf8)) { source in
                 // Git's editor protocol is a fixed command, never interpolated caller code.
                 // The only variable is a quoted, app-owned input pathname. No exec commands.
                 _ = try await command(["-c", "sequence.editor=/bin/cp -- \"$FORKY_REBASE_TODO\"",
                     "-c", "core.editor=/usr/bin/true", "-c", "submodule.recurse=false",
-                    "rebase", "--interactive", "--no-autostash", "--no-autosquash", "--no-update-refs",
-                    "--no-rebase-merges", "--no-rerere-autoupdate", "--keep-empty",
+                    "rebase", "--interactive", "--no-autostash", "--no-autosquash", options.updateReferences ? "--update-refs" : "--no-update-refs",
+                    "--no-rebase-merges", "--no-rerere-autoupdate", "--keep-empty", "--reapply-cherry-picks", "--empty=stop",
                     "--onto", target, plan.baseOID], write: true, timeout: 300, sequenceEditor: source)
             }
         }
     }
 
-    private func operationDigest(_ snapshot: RepositorySnapshot) throws -> String {
+    func worktreeDigest(_ snapshot: RepositorySnapshot) throws -> String {
         var hash = SHA256(), total = 0
         for file in snapshot.changes.sorted(by: { $0.path.value < $1.path.value }) {
             let data = try SafeWorktree.read(root: root, path: file.path, limit: runner.outputLimit)
@@ -94,21 +110,32 @@ extension GitRepository {
             let fresh = try await checkReviewed(expected, allowOperation: true)
             guard let kind = fresh.operation.kind, kind != .unknown else { throw GitError.invalidInput("No supported operation is active. " + (fresh.operation.detail ?? "")) }
             let message = try GitParsers.string(try await command(["log", "-1", "--format=%B", "HEAD", "--"]).stdout)
-            return OperationReview(root: root, snapshot: fresh, worktreeDigest: try operationDigest(fresh), message: message)
+            return OperationReview(root: root, snapshot: fresh, worktreeDigest: try worktreeDigest(fresh), message: message)
         }
     }
-    private func checkedOperation(_ review: OperationReview) async throws -> RepositorySnapshot {
+    private func checkedOperation(_ review: OperationReview, validateReferenceUpdates: Bool = true) async throws -> RepositorySnapshot {
         guard review.root == root else { throw GitError.staleRepository }
         let fresh = try await checkReviewed(review.snapshot, allowOperation: true)
         guard fresh.operation.kind != nil, fresh.operation.kind != .unknown,
-              try operationDigest(fresh) == review.worktreeDigest else { throw GitError.staleRepository }
+              try worktreeDigest(fresh) == review.worktreeDigest else { throw GitError.staleRepository }
+        if fresh.operation.kind == .rebase, let name = fresh.operation.branchRef, name.hasPrefix("refs/heads/"),
+           fresh.references.first(where: { $0.fullName == name })?.commitOID != fresh.operation.restoreOID { throw GitError.staleRepository }
+        if validateReferenceUpdates && !fresh.operation.referenceUpdates.isEmpty {
+            let occupied = Set(try await readWorktrees().compactMap(\.branch))
+            for update in fresh.operation.referenceUpdates {
+                _ = try await command(["check-ref-format", update.name])
+                guard !occupied.contains(update.name),
+                      fresh.references.first(where: { $0.fullName == update.name })?.objectOID == update.oldOID else { throw GitError.staleRepository }
+            }
+        }
         return fresh
     }
 
     public func stepOperation(_ review: OperationReview, step: OperationStep) async throws {
         try await gate.withPermit {
-            let fresh = try await checkedOperation(review)
+            let fresh = try await checkedOperation(review, validateReferenceUpdates: step != .abort)
             guard let kind = fresh.operation.kind else { throw GitError.staleRepository }
+            guard kind != .bisect else { throw GitError.invalidInput("Use the explicit Bisect controls for this operation.") }
             if step == .resume {
                 guard !fresh.hasConflicts else { throw GitError.conflicts }
                 guard !fresh.changes.contains(where: { !$0.isUntracked && $0.isUnstaged }) else { throw GitError.dirtyWorktree }

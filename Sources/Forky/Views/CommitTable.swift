@@ -9,6 +9,8 @@ struct CommitTable: NSViewRepresentable {
     @Binding var selection: String?
     let canExecute: (HistoryCommand, GitCommit) -> Bool
     let execute: (HistoryCommand, GitCommit) -> Void
+    var showsMenu = true
+    var accessibilityID = "commitTable"
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -24,7 +26,7 @@ struct CommitTable: NSViewRepresentable {
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.allowsEmptySelection = true
         table.dataSource = context.coordinator; table.delegate = context.coordinator
-        table.setAccessibilityIdentifier("commitTable")
+        table.setAccessibilityIdentifier(accessibilityID)
         for (id, title, width) in [("graph", "Graph", 70.0), ("subject", "Commit", 430.0),
                                    ("author", "Author", 115.0), ("sha", "SHA", 80.0), ("date", "Date", 125.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
@@ -36,7 +38,7 @@ struct CommitTable: NSViewRepresentable {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = context.coordinator
-        table.menu = menu
+        table.menu = showsMenu ? menu : nil
         context.coordinator.table = table
         scroll.documentView = table
         return scroll

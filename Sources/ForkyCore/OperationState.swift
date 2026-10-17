@@ -1,8 +1,14 @@
 import Foundation
 import CryptoKit
 
+public struct OperationReferenceUpdate: Identifiable, Sendable {
+    public let name: String
+    public let oldOID: String?
+    public let newOID: String?
+    public var id: String { name }
+}
 public struct RepositoryOperation: Sendable {
-    public enum Kind: String, Sendable { case merge, cherryPick = "cherry-pick", revert, rebase, unknown }
+    public enum Kind: String, Sendable { case merge, cherryPick = "cherry-pick", revert, rebase, bisect, unknown }
     public let kind: Kind?
     public let token: String
     public let canAmend: Bool
@@ -12,6 +18,7 @@ public struct RepositoryOperation: Sendable {
     public let supportedTodo: Bool
     public let restoreOID: String?
     public let branchRef: String?
+    public let referenceUpdates: [OperationReferenceUpdate]
     public var isActive: Bool { kind != nil }
 }
 
@@ -34,15 +41,16 @@ public struct RebasePlan: Sendable {
 }
 
 extension GitRepository {
-    func readOperation(gitDirectory: URL, head: String?) throws -> RepositoryOperation {
+    func readOperation(gitDirectory: URL, head: String?, references: [GitReference] = []) throws -> RepositoryOperation {
         var bytes = Data(), detected: [RepositoryOperation.Kind] = [], amend = false, rebaseMarkers = 0
         let groups: [(RepositoryOperation.Kind, String, [String])] = [
-            (.merge, "MERGE_HEAD", []), (.cherryPick, "CHERRY_PICK_HEAD", []), (.revert, "REVERT_HEAD", []),
-            (.rebase, "rebase-merge", ["head-name", "orig-head", "onto", "git-rebase-todo", "done", "amend", "stopped-sha"]),
+            (.bisect, "BISECT_LOG", []), (.merge, "MERGE_HEAD", []), (.cherryPick, "CHERRY_PICK_HEAD", []), (.revert, "REVERT_HEAD", []),
+            (.rebase, "rebase-merge", ["head-name", "orig-head", "onto", "git-rebase-todo", "done", "amend", "stopped-sha", "update-refs"]),
             (.rebase, "rebase-apply", ["head-name", "orig-head", "onto", "next", "last"]),
             (.unknown, "sequencer", ["head", "abort-safety", "todo"])
         ]
         var problem: String?, pendingTodo: String?, restoreOID: String?, branchRef: String?
+        var referenceUpdates: [OperationReferenceUpdate] = []
         func append(_ label: String, _ value: Data) {
             bytes.append(Data((label + "\0" + String(value.count) + "\0").utf8)); bytes.append(value)
         }
@@ -57,6 +65,20 @@ extension GitRepository {
                 append(name, Data())
                 if children.isEmpty {
                     guard let value = try SafeWorktree.readAbsolute(url, limit: 1024 * 1024) else { throw GitError.staleRepository }
+                    if kind == .bisect {
+                        guard !value.isEmpty, !value.contains(0), let start = try SafeWorktree.readAbsolute(gitDirectory.appendingPathComponent("BISECT_START"), limit: 65536) else { throw GitError.malformedOutput("Incomplete bisect state.") }
+                        var name = try GitParsers.string(start)
+                        if name.hasSuffix("\n") { name.removeLast() }
+                        if GitParsers.isOID(name) { restoreOID = name }
+                        else {
+                            let full = name.hasPrefix("refs/heads/") ? name : "refs/heads/" + name
+                            guard let ref = references.first(where: { $0.fullName == full }) else { throw GitError.malformedOutput("Bisect restore branch is unavailable.") }
+                            branchRef = full; restoreOID = ref.commitOID
+                        }
+                        guard let restoreOID else { throw GitError.malformedOutput("Unknown bisect restore commit.") }
+                        append("BISECT_LOG", value); append("BISECT_START", start); append("bisect-restore", Data(restoreOID.utf8))
+                        continue
+                    }
                     let oids = try GitParsers.string(value).split(separator: "\n")
                     guard !oids.isEmpty, oids.allSatisfy({ GitParsers.isOID(String($0)) }), kind == .merge || oids.count == 1 else {
                         throw GitError.malformedOutput("Invalid operation marker: " + name)
@@ -81,6 +103,19 @@ extension GitRepository {
                             }
                         }
                     }
+                    if let value = values["update-refs"] {
+                        guard value.isEmpty || value.last == 10 else { throw GitError.malformedOutput("Incomplete update-refs state.") }
+                        let rows = try GitParsers.string(value).split(separator: "\n").map(String.init)
+                        guard rows.count.isMultiple(of: 3) else { throw GitError.malformedOutput("Invalid update-refs fields.") }
+                        var names = Set<String>()
+                        for i in stride(from: 0, to: rows.count, by: 3) {
+                            guard rows[i].hasPrefix("refs/heads/"), names.insert(rows[i]).inserted,
+                                  GitParsers.isOID(rows[i + 1]), GitParsers.isOID(rows[i + 2]) else { throw GitError.malformedOutput("Invalid reference-update identity.") }
+                            referenceUpdates.append(OperationReferenceUpdate(name: rows[i],
+                                oldOID: rows[i + 1].allSatisfy({ $0 == "0" }) ? nil : rows[i + 1],
+                                newOID: rows[i + 2].allSatisfy({ $0 == "0" }) ? nil : rows[i + 2]))
+                        }
+                    }
                     if let value = values["git-rebase-todo"] ?? values["todo"] { pendingTodo = try GitParsers.string(value) }
                     if let value = values["orig-head"] ?? (name == "sequencer" ? values["head"] : nil) {
                         let oid = try GitParsers.string(value).trimmingCharacters(in: .newlines)
@@ -99,6 +134,7 @@ extension GitRepository {
         else if rebaseMarkers > 1 || (!detected.contains(.rebase) && Set(detected.filter { $0 != .unknown }).count > 1) {
             kind = .unknown; problem = "Contradictory Git operation markers. Inspect repository state externally."
         }
+        else if detected.contains(.bisect) { kind = .bisect }
         else if detected.contains(.rebase) { kind = .rebase }
         else if detected.contains(.cherryPick) { kind = .cherryPick }
         else if detected.contains(.revert) { kind = .revert }
@@ -120,6 +156,10 @@ extension GitRepository {
             let fields = row.utf8.split(whereSeparator: { $0 == 32 || $0 == 9 || $0 == 13 }).map { String(decoding: $0, as: UTF8.self) }
             guard let command = fields.first, command.utf8.first != 35 else { continue }
             if command == "noop" { continue }
+            if command == "update-ref" {
+                if fields.count != 2 || !referenceUpdates.contains(where: { $0.name == fields[1] }) { supported = false }
+                continue
+            }
             guard ["pick", "p", "edit", "e", "squash", "s", "fixup", "f", "drop", "d"].contains(String(command)),
                   fields.count >= 2, (4...64).contains(fields[1].utf8.count),
                   fields[1].utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { supported = false; continue }
@@ -127,7 +167,7 @@ extension GitRepository {
         }
         return RepositoryOperation(kind: kind, token: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(),
                                    canAmend: kind == .rebase && amend, detail: problem, pendingTodo: pendingTodo,
-                                   pendingRevisions: pending, supportedTodo: supported, restoreOID: restoreOID, branchRef: branchRef)
+                                   pendingRevisions: pending, supportedTodo: supported, restoreOID: restoreOID, branchRef: branchRef, referenceUpdates: referenceUpdates)
     }
 
     func checkReviewed(_ expected: RepositorySnapshot, clean: Bool = false, allowOperation: Bool = false) async throws -> RepositorySnapshot {

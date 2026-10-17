@@ -15,39 +15,65 @@ public enum ConflictResolution: Sendable { case text(String), delete }
 
 extension GitRepository {
     public func reviewPartial(_ change: FileChange, side: DiffSide, expected: RepositorySnapshot) async throws -> PartialReview {
+        try await reviewSelectedPatch(change, side: side, expected: expected, discard: false)
+    }
+    public func reviewDiscard(_ change: FileChange, expected: RepositorySnapshot) async throws -> PartialReview {
+        try await reviewSelectedPatch(change, side: .worktree, expected: expected, discard: true)
+    }
+    private func reviewSelectedPatch(_ change: FileChange, side: DiffSide, expected: RepositorySnapshot, discard: Bool) async throws -> PartialReview {
         try await gate.withPermit {
             let fresh = try await checkReviewed(expected, allowOperation: true)
-            guard !change.isConflict, !change.isUntracked, fresh.changes.contains(change),
-                  side == .staged ? change.index == "M" : change.worktree == "M" else {
+            guard change.canReviewPartial(on: side), fresh.changes.contains(change) else {
                 throw GitError.invalidInput("Select a regular modified tracked file for line staging.")
             }
-            let entry = try await command(["ls-files", "--stage", "-z", "--", change.path.value], literalPaths: true).stdout
-            guard let first = entry.split(separator: 0).first, entry.split(separator: 0).count == 1,
-                  let tab = first.firstIndex(of: 9) else { throw GitError.staleRepository }
-            let fields = try GitParsers.string(Data(first[..<tab])).split(separator: " ")
-            guard fields.count == 3, ["100644", "100755"].contains(String(fields[0])), fields[2] == "0" else {
-                throw GitError.invalidInput("Partial staging requires a regular index file, not a symlink/submodule.")
+            var entry = try await command(["ls-files", "--stage", "-z", "--", change.path.value], literalPaths: true).stdout
+            if change.isUntracked {
+                guard try SafeWorktree.read(root: root, path: change.path, limit: runner.outputLimit) != nil else { throw GitError.staleRepository }
+            } else {
+                if entry.isEmpty, side == .staged, change.index == "D", let head = fresh.head {
+                    entry = try await command(["ls-tree", "-z", head, "--", change.path.value], literalPaths: true).stdout
+                }
+                guard let first = entry.split(separator: 0).first, entry.split(separator: 0).count == 1,
+                      let tab = first.firstIndex(of: 9) else { throw GitError.staleRepository }
+                let fields = try GitParsers.string(Data(first[..<tab])).split(separator: " ")
+                guard fields.count == 3, ["100644", "100755"].contains(String(fields[0])) else {
+                    throw GitError.invalidInput("Partial staging requires a regular text file, not a symlink/submodule.")
+                }
+                _ = try SafeWorktree.read(root: root, path: change.path, limit: runner.outputLimit)
             }
-            return PartialReview(root: root, expected: fresh, change: change, side: side,
-                                 patch: try PartialPatch(try await partialText(change.path, side: side)))
+            return PartialReview(root: root, expected: fresh, change: change, side: side, writesWorktree: discard,
+                                 patch: try PartialPatch(try await partialText(change, side: side, discard: discard)))
         }
     }
-    private func partialText(_ path: GitPath, side: DiffSide) async throws -> String {
-        try GitParsers.string(try await command(["-c", "diff.suppressBlankEmpty=false", "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+    private func partialText(_ change: FileChange, side: DiffSide, discard: Bool = false) async throws -> String {
+        let result = try await command(["-c", "diff.suppressBlankEmpty=false", "diff", "--no-ext-diff", "--no-textconv", "--no-color",
             "--output-indicator-new=+", "--output-indicator-old=-", "--output-indicator-context= ", "--no-renames", "--full-index", "--no-relative", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3"]
-            + (side == .staged ? ["--cached", "-R"] : []) + ["--", path.value], literalPaths: true).stdout)
+            + (change.isUntracked ? ["--no-index"] : side == .staged ? ["--cached", "-R"] : [])
+            + (discard ? ["-R"] : []) + ["--"] + (change.isUntracked ? ["/dev/null", change.path.value] : [change.path.value]), accepted: [0, 1], literalPaths: true)
+        return try GitParsers.string(result.stdout)
     }
-    public func applyPartial(_ review: PartialReview, selected: Set<Int>) async throws {
+    public func applyPartial(_ review: PartialReview, selected: Set<Int>, approveDiscard: Bool = false) async throws {
         try await gate.withPermit {
             guard review.root == root else { throw GitError.staleRepository }
+            guard !review.writesWorktree || approveDiscard else { throw GitError.invalidInput("Working file discard requires explicit approval.") }
             _ = try await checkReviewed(review.expected, allowOperation: true)
-            guard try await partialText(review.change.path, side: review.side) == review.patch.raw else { throw GitError.staleRepository }
+            guard try await partialText(review.change, side: review.side, discard: review.writesWorktree) == review.patch.raw else { throw GitError.staleRepository }
             let data = Data(try review.patch.selecting(selected).utf8)
             try await TemporaryInput.withFile(data) { file in
-                _ = try await command(["apply", "--cached", "--check", "--whitespace=nowarn", "--", file.path])
+                _ = try await command(["apply"] + (review.writesWorktree ? [] : ["--cached"]) + ["--check", "--whitespace=nowarn", "--", file.path])
                 try Task.checkCancellation()
-                _ = try await command(["apply", "--cached", "--whitespace=nowarn", "--", file.path], write: true)
+                _ = try await command(["apply"] + (review.writesWorktree ? [] : ["--cached"]) + ["--whitespace=nowarn", "--", file.path], write: true)
             }
+        }
+    }
+
+    public func runMergetool(_ review: ConflictReview) async throws {
+        try await gate.withPermit {
+            guard review.root == root else { throw GitError.staleRepository }
+            let fresh = try await checkReviewed(review.expected, allowOperation: true)
+            let current = try await conflict(review.path, snapshot: fresh)
+            guard current.stages == review.stages, current.workingBytes == review.workingBytes else { throw GitError.staleRepository }
+            _ = try await command(["mergetool", "--no-prompt", "--", review.path.value], write: true, literalPaths: true, timeout: 300)
         }
     }
 
@@ -57,7 +83,7 @@ extension GitRepository {
             return try await conflict(path, snapshot: fresh)
         }
     }
-    private func conflict(_ path: GitPath, snapshot: RepositorySnapshot) async throws -> ConflictReview {
+    func conflict(_ path: GitPath, snapshot: RepositorySnapshot) async throws -> ConflictReview {
         guard snapshot.changes.contains(where: { $0.path == path && $0.isConflict }) else { throw GitError.staleRepository }
         let stages = try await command(["ls-files", "--unmerged", "-z", "--", path.value], literalPaths: true).stdout
         var versions: [Int: String] = [:]

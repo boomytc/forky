@@ -4,15 +4,18 @@ import CryptoKit
 public struct GitRepository: Sendable {
     public let root: URL
     let runner: GitProcessRunner
-    let gate = AsyncGate()
+    let gate: AsyncGate
+    public let gitDirectory: URL
+    public let commonDirectory: URL
     public static let historyPageSize = 200
 
-    private init(root: URL, runner: GitProcessRunner) {
-        self.root = root
-        self.runner = runner
+    private init(root: URL, runner: GitProcessRunner, gate: AsyncGate, gitDirectory: URL, commonDirectory: URL) {
+        self.root = root; self.runner = runner; self.gate = gate
+        self.gitDirectory = gitDirectory; self.commonDirectory = commonDirectory
     }
 
     public static func open(_ directory: URL, runner: GitProcessRunner = .init()) async throws -> GitRepository {
+        guard directory.isFileURL, directory.path.hasPrefix("/"), !directory.path.utf8.contains(0) else { throw GitError.unsupportedPath }
         let output = try await runner.run(["--no-pager", "-C", directory.path, "rev-parse", "--show-toplevel"])
         guard output.status == 0 else {
             throw GitError.invalidRepository(String(decoding: output.stderr, as: UTF8.self))
@@ -20,7 +23,18 @@ public struct GitRepository: Sendable {
         var path = try GitParsers.string(output.stdout)
         if path.hasSuffix("\n") { path.removeLast() }
         guard path.hasPrefix("/") else { throw GitError.invalidRepository("Git did not return an absolute worktree path.") }
-        let repository = GitRepository(root: URL(fileURLWithPath: path, isDirectory: true), runner: runner)
+        let root = URL(fileURLWithPath: path, isDirectory: true)
+        func resolvedDirectory(_ flag: String) async throws -> URL {
+            let result = try await runner.run(["--no-pager", "-C", root.path, "rev-parse", "--path-format=absolute", flag])
+            guard result.status == 0 else { throw GitError.invalidRepository(String(decoding: result.stderr, as: UTF8.self)) }
+            var value = try GitParsers.string(result.stdout)
+            if value.hasSuffix("\n") { value.removeLast() }
+            guard value.hasPrefix("/") else { throw GitError.unsupportedPath }
+            return URL(fileURLWithPath: value, isDirectory: true)
+        }
+        let gitDirectory = try await resolvedDirectory("--git-dir"), commonDirectory = try await resolvedDirectory("--git-common-dir")
+        let gate = await RepositoryGates.shared.gate(for: commonDirectory.resolvingSymlinksInPath().path)
+        let repository = GitRepository(root: root, runner: runner, gate: gate, gitDirectory: gitDirectory, commonDirectory: commonDirectory)
         let bare = try await repository.command(["rev-parse", "--is-bare-repository"])
         guard bare.stdout == Data("false\n".utf8) else { throw GitError.invalidRepository("Bare repositories are not supported.") }
         return repository
@@ -30,15 +44,17 @@ public struct GitRepository: Sendable {
         try await gate.withPermit { try await readSnapshot() }
     }
 
-    public func history(ref: String? = nil, query: String = "", cursor: HistoryCursor? = nil) async throws -> HistoryPage {
+    public func history(ref: String? = nil, query: String = "", cursor: HistoryCursor? = nil, options: HistoryOptions = .init()) async throws -> HistoryPage {
         try await gate.withPermit {
             let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.utf8.contains(0), query.utf8.count <= 4096 else {
                 throw GitError.malformedOutput("History query is too large or contains NUL.")
             }
+            guard options.after?.timeIntervalSince1970.isFinite ?? true, options.before?.timeIntervalSince1970.isFinite ?? true else { throw GitError.invalidInput("History dates must be finite.") }
+            if let after = options.after, let before = options.before, after > before { throw GitError.invalidInput("History date range is reversed.") }
             let roots: [String], references: [GitReference], offset: Int
             if let cursor {
-                guard cursor.ref == ref, cursor.query == query else {
+                guard cursor.ref == ref, cursor.query == query, cursor.options == options else {
                     throw GitError.malformedOutput("History cursor belongs to another query.")
                 }
                 roots = cursor.revisions; references = cursor.references; offset = cursor.offset
@@ -54,25 +70,43 @@ public struct GitRepository: Sendable {
                     roots = [oid]
                 } else {
                     let head = try await headOID()
-                    roots = Array(Set(references.map(\.objectOID) + (head.map { [$0] } ?? []))).sorted()
+                    roots = Array(Set(references.compactMap(\.commitOID) + (head.map { [$0] } ?? []))).sorted()
                 }
             }
             guard !roots.isEmpty else { return HistoryPage(commits: [], nextCursor: nil, references: references) }
             var args = ["log", "--topo-order", "--max-count=\(Self.historyPageSize + 1)",
                         "--skip=\(offset)", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b", "-z"]
-            if !query.isEmpty { args += ["--fixed-strings", "--regexp-ignore-case", "--grep=" + query] }
-            let output = try await command(args + roots + ["--"])
+            if options.firstParent { args += ["--first-parent"] }
+            if let after = options.after { args += ["--since=" + after.ISO8601Format()] }
+            if let before = options.before { args += ["--until=" + before.ISO8601Format()] }
+            var selectedRoots = roots, paths: [String] = []
+            if !query.isEmpty {
+                switch options.search {
+                case .message: args += ["--fixed-strings", "--regexp-ignore-case", "--grep=" + query]
+                case .author: args += ["--fixed-strings", "--regexp-ignore-case", "--author=" + query]
+                case .committer: args += ["--fixed-strings", "--regexp-ignore-case", "--committer=" + query]
+                case .path: paths = [try GitPath(query).value]
+                case .content: args += ["--no-ext-diff", "--no-textconv", "-S" + query]
+                case .oid:
+                    guard (4...64).contains(query.utf8.count), query.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) || (65...70).contains($0) }) else { throw GitError.invalidInput("SHA lookup requires 4–64 hexadecimal digits; it is not branch-filtered.") }
+                    var oid = try GitParsers.string(try await command(["rev-parse", "--verify", query + "^{commit}"]).stdout)
+                    if oid.hasSuffix("\n") { oid.removeLast() }
+                    guard GitParsers.isOID(oid) else { throw GitError.staleRepository }
+                    selectedRoots = [oid]; args += ["--no-walk"]
+                }
+            }
+            let output = try await command(args + selectedRoots + ["--"] + paths, literalPaths: !paths.isEmpty)
             let commits = try GitParsers.commits(output.stdout)
             let page = Array(commits.prefix(Self.historyPageSize))
             let next = commits.count > Self.historyPageSize
-                ? HistoryCursor(revisions: roots, offset: offset + page.count, query: query, ref: ref, references: references) : nil
+                ? HistoryCursor(revisions: roots, offset: offset + page.count, query: query, ref: ref, references: references, options: options) : nil
             return HistoryPage(commits: page, nextCursor: next, references: references)
         }
     }
 
-    public func diff(_ change: FileChange, side: DiffSide) async throws -> String {
+    public func diff(_ change: FileChange, side: DiffSide, options: DiffOptions = .init()) async throws -> String {
         try await gate.withPermit {
-            let common = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"]
+            let common = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"] + options.arguments
             let result: GitProcessResult
             if change.isUntracked {
                 guard side == .worktree else { return "" }
@@ -85,22 +119,24 @@ public struct GitRepository: Sendable {
         }
     }
 
-    public func files(in commit: GitCommit) async throws -> [CommitFile] {
+    public func files(in commit: GitCommit, parent: String? = nil) async throws -> [CommitFile] {
         try await gate.withPermit {
             try validate(commit)
-            let revisions = commit.parents.first.map { [$0, commit.oid] } ?? [commit.oid]
+            if let parent, !commit.parents.contains(parent) { throw GitError.staleRepository }
+            let revisions = (parent ?? commit.parents.first).map { [$0, commit.oid] } ?? [commit.oid]
             let result = try await command(["diff-tree", "--root", "--no-commit-id", "--name-status",
                                             "-r", "-z", "-M"] + revisions + ["--"])
             return try GitParsers.commitFiles(result.stdout)
         }
     }
 
-    public func diff(_ file: CommitFile, in commit: GitCommit) async throws -> String {
+    public func diff(_ file: CommitFile, in commit: GitCommit, parent: String? = nil, options: DiffOptions = .init()) async throws -> String {
         try await gate.withPermit {
             try validate(commit)
-            let safety = ["--no-ext-diff", "--no-textconv", "--no-color"]
+            let safety = ["--no-ext-diff", "--no-textconv", "--no-color"] + options.arguments
             let args: [String]
-            if let parent = commit.parents.first {
+            if let parent, !commit.parents.contains(parent) { throw GitError.staleRepository }
+            if let parent = parent ?? commit.parents.first {
                 args = ["diff"] + safety + [parent, commit.oid, "--"] + file.pathspecs
             } else {
                 args = ["show", "--format=", "--root"] + safety + [commit.oid, "--"] + file.pathspecs
@@ -193,7 +229,9 @@ public struct GitRepository: Sendable {
         if let sequenceEditor { output = try await execution.runWithSequenceEditor(args + arguments, source: sequenceEditor) }
         else { output = try await execution.run(args + arguments) }
         guard accepted.contains(output.status) else {
-            throw GitError.commandFailed(output.status, String(decoding: output.stderr, as: UTF8.self))
+            var details = String(decoding: output.stderr, as: UTF8.self)
+            if !output.stdout.isEmpty { details += "\n\n[Git stdout — may describe partial successes]\n" + String(decoding: output.stdout, as: UTF8.self) }
+            throw GitError.commandFailed(output.status, details)
         }
         return output
     }
@@ -205,7 +243,7 @@ public struct GitRepository: Sendable {
         return try GitParsers.references(output.stdout)
     }
 
-    private func headOID() async throws -> String? {
+    func headOID() async throws -> String? {
         let output = try await command(["rev-parse", "--verify", "--quiet", "HEAD"], accepted: [0, 1])
         guard output.status == 0 else { return nil }
         let oid = try GitParsers.string(output.stdout).trimmingCharacters(in: .newlines)
@@ -230,7 +268,7 @@ public struct GitRepository: Sendable {
         var gitPath = try GitParsers.string(gitDirResult.stdout)
         if gitPath.hasSuffix("\n") { gitPath.removeLast() }
         let gitDirectory = URL(fileURLWithPath: gitPath, isDirectory: true)
-        let operation = try readOperation(gitDirectory: gitDirectory, head: head)
+        let operation = try readOperation(gitDirectory: gitDirectory, head: head, references: references)
         let collaboration: Observed<CollaborationSnapshot>
         do { collaboration = .available(try await readCollaboration(head: head, branch: branch, references: references)) }
         catch is CancellationError { throw CancellationError() }

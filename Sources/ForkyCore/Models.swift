@@ -29,6 +29,9 @@ public struct FileChange: Identifiable, Hashable, Sendable {
     public var unstagePaths: [String] {
         if index == "R", let originalPath { [path.value, originalPath.value] } else { [path.value] }
     }
+    public func canReviewPartial(on side: DiffSide) -> Bool {
+        !isConflict && (isUntracked ? side == .worktree : ["M", "A", "D"].contains(side == .staged ? index : worktree))
+    }
     public var statusLabel: String {
         if isConflict { return "Conflict" }
         if isUntracked { return "New" }
@@ -103,6 +106,7 @@ public struct HistoryCursor: Sendable {
     let query: String
     let ref: String?
     let references: [GitReference]
+    let options: HistoryOptions
 }
 
 public struct HistoryPage: Sendable {

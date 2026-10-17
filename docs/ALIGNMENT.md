@@ -1,69 +1,57 @@
 # Fork workflow alignment
 
-Forky is independently implemented with original branding/assets, not recovered Fork
-code or a claim of full parity. The goal is a calm native client with explicit, complete
-workflows—not a collection of similar-looking inactive buttons.
+Forky is an independent native Git manager, not recovered Fork source or a full parity claim.
+REA's Fork 2.70.2 static declarations guided the G01–G22 workflow inventory; native state
+machines, service behavior and precise Fork policies were not established by those declarations.
 
-## Reference scope
+## Reference and provenance
 
-Prior public [Mac overview](https://git-fork.com/images/carousel/carousel_mainMac.jpg),
-[diff screenshot](https://git-fork.com/images/carousel/carousel_commitviewMac2.jpg),
-[feature page](https://git-fork.com/) and [release notes](https://git-fork.com/releasenotes)
-informed the workflow inventory. Those older screenshots do not establish the exact
-current appearance/behavior of Fork 2.70.2. A fresh page fetch in this iteration was
-blocked by the network tool's fake-IP address guard; no guard was disabled.
+The separate ignored REA audit is:
+`/Users/boom/workspace/rea/.cache/investigations/fork-alignment-2.70.2.zijwnbwc/REPORT.md`.
+Its ledger covers 180 archive records / 149 logical NIB groups, with truncated graph
+envelopes and unresolved edges; archive coverage is not runtime or handler coverage.
+Fork executable SHA-256:
+`0e8ece0c47989913d8a519711bf194c018659ebabea05696b396a5a21497b3dd`.
 
-Prior local static evidence remains in the separate REA investigation. Fork.app and
-business repositories were not opened/mutated for this iteration. Research images
-remain ignored artifacts, not bundled application assets.
+Forky baseline is human commit `ef7656dbed07f6af98cdcb70472ffdda2074b33b`.
+This follow-up independently implements the bounded workflows in
+[IMPLEMENTATION_MATRIX.md](IMPLEMENTATION_MATRIX.md). Fork.app and business repositories
+were not executed/mutated. Public/reference imagery stays ignored, never app assets:
+[overview](https://git-fork.com/images/carousel/carousel_mainMac.jpg),
+[commit view](https://git-fork.com/images/carousel/carousel_commitviewMac2.jpg),
+[feature site](https://git-fork.com/) and [release notes](https://git-fork.com/releasenotes).
+Older/public screenshots do not prove exact 2.70.2 behavior.
 
-## Current outcomes
+## Observable outcomes
 
-| Analyst/user task | Forky workflow |
-| --- | --- |
-| Start working | Open worktree/subdirectory; clone or initialize a new folder; recent repositories |
-| Understand history | Real connected graph, frozen paging, literal message/body search, branch/tag badges |
-| Review a commit | Full SHA/parents/author/message, root/first-parent changes, unified or split diff |
-| Prepare a commit | Explicit file/batch/line/hunk stage and unstage; staged-only commits; retained drafts |
-| Resolve conflicts | Base / stage 2 / stage 3 and edited result; save-only or stage; Continue/Skip/Abort |
-| Apply history | Confirmed non-merge cherry-pick/revert, with conflict recovery |
-| Rewrite a range | Linear reorder/pick/edit-reword/squash/fixup/drop; captured onto; paused amendment |
-| Browse source | Captured commit tree and per-line blame, without checkout |
-| Work on an older commit | Select commit → Create Branch Here; source is that OID, not current HEAD; no implicit checkout |
-| Use a remote branch | Fetch → select concrete remote ref → create local tracking branch and checkout after confirmation |
-| First publication | Add remote → review destination → publish one branch → optional upstream setup |
-| Synchronize | Review remote → Fetch / fast-forward-only Pull / non-force Push; show locally known ahead/behind |
-| Set work aside | Save stash, opt into untracked files, preview, apply with optional index restoration |
-| Retain recovery | Applying never drops the stash; explicit destructive drop is a separate confirmation |
-| Interrupt/recover context | Cancel the operation, finish cleanup/reconciliation, report actual state; repository-labelled activity |
+Daily workflows now include auto-refresh, ordinary amend/reword, complete scoped refs
+management, merge start, recovery/reset, file history/blame/back, comparisons/search,
+inline patch actions, diff/image review, conflict chunks, richer replay, stash variants,
+worktrees, independent tabs/workspaces, Git settings, explicit transport variants,
+patch files, submodules, BYO LFS, real local statistics/bisect/Gitflow/trusted AI tools.
 
-Primary synchronization actions have visible text; secondary actions remain compact.
-Sidebar covers changes/history/stashes/refs; confirmations identify repository, branch
-and effects. Disabled actions reflect missing prerequisites, not unimplemented features.
-No hidden network polling, auto-stash, force push or automatic history rewrite.
+Each group maps to actual Core APIs and native UI entries in the matrix. BYO tools have
+real process boundaries and explicit unavailable errors, not copied bundled providers.
+A successful local LFS filter test does not establish LFS server locking/authentication;
+a /bin/cat input-file test does not establish an AI service. Gitflow is not installed.
 
-## Deliberate conservative differences
+## Conservative differences
 
-- Pull stops on divergence. Merge/rebase policy is never guessed.
-- Branch checkout requires a completely clean worktree; no automatic stash/carryover.
-- No mirror remotes or fetch mappings outside the selected remote's tracking namespace.
-- No recursive submodule operations, automatic fetch pruning/tags or implicit multi-ref push.
-- Stash application keeps recovery entries; pop remains absent.
-- Existing directories cannot be cloned/initialized into through this UI.
-- Credentials come from existing Git/SSH configuration, not a new account UI.
-- Split diff remains a preview; line staging has a separate complete canonical patch model.
-- Rebase accepts complete linear ranges, not arbitrary todo or merge-preserving plans.
-- Potential ignored local obstructions stop replay rather than being silently overwritten.
+- Ordinary Pull remains FF-only; separately inspect already-fetched merge/rebase.
+- No force/mirror push, implicit tags/refs, recursive updates, auto stash or hidden checkout.
+- Stash apply retains recovery; explicit pop drops only after success and identity recheck.
+- Creation never adopts an existing directory. Removal refuses local data/unknown ownership.
+- Partial regular text includes new/deleted files, not rename/type/mode/binary transitions.
+- Rebase remains a complete linear ≤200-commit typed plan; update-refs is opt-in, never a
+  side effect of Git configuration alone. Backup tags stay outside automatic branch updates.
+- Git/SSH/helpers supply credentials and signing; no new account or token database.
+- Unknown/malformed metadata is unavailable/active unknown, never clean/empty/idle.
+- Configured code is trusted, not sandboxed; writes are not rollback or cross-client atomicity.
 
-## Remaining gaps toward a full Git manager
+## Remaining verification/design boundaries
 
-These are **not shipped claims**:
-
-1. Partial added/deleted/renamed files, binary/submodule comparison and word diff.
-2. Complex conflicts; merge-start/mainline UI, merge-preserving rebase and richer message editing.
-3. File history/navigation from blame, branch/tag rename/delete, stash pop and repository tabs.
-4. Filesystem watching, larger-repository responsiveness/accessibility, credentials/account UI.
-5. Authenticated HTTPS/SSH, older macOS/Intel, release signing/notarization and optional AI.
-
-The public Git transport boundary is verified with isolated real bare remotes, not live
-GitHub/GitLab accounts. See [VALIDATION.md](VALIDATION.md) for precise test coverage.
+Complex conflicts; syntax/word diff; merge-preserving rebase; native service-account/AI
+providers; broad keyboard/accessibility/IME/dark-mode coverage; old macOS/Intel; huge
+production repositories and notarized distribution remain outside completed claims.
+These are explicit exclusions/verification limits, not a parity percentage.
+See [WORKFLOWS.md](WORKFLOWS.md) and [VALIDATION.md](VALIDATION.md).
