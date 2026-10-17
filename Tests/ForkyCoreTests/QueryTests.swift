@@ -35,6 +35,55 @@ struct QueryTests {
         let old = try #require(page.entries.last)
         #expect(try await repo.text(at: old.commit.oid, path: old.path) == "# Hello\n")
     }
+    @Test func reflogPagesWithoutGapsOrDuplicates() async throws {
+        let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
+        let tree = String(decoding: try await f.git(["rev-parse", "HEAD^{tree}"]).stdout, as: UTF8.self)
+            .trimmingCharacters(in: .newlines)
+        var tip = String(decoding: try await f.git(["rev-parse", "HEAD"]).stdout, as: UTF8.self)
+            .trimmingCharacters(in: .newlines)
+        for number in 1...204 {
+            tip = String(decoding: try await f.git(["commit-tree", tree, "-p", tip, "-m", "Reflog \(number)"]).stdout,
+                         as: UTF8.self).trimmingCharacters(in: .newlines)
+            try await f.git(["update-ref", "refs/heads/main", tip])
+        }
+        let repository = try await f.repository()
+        let first = try await repository.reflog()
+        #expect(first.entries.count == GitRepository.queryPageSize)
+        let cursor = try #require(first.nextCursor)
+        let second = try await repository.reflog(after: cursor)
+        #expect(second.entries.count == 5 && !second.hasMore)
+        let all = first.entries + second.entries
+        #expect(all.count == 205)
+        #expect(Set(all.map(\.id)).count == 205)
+        #expect(all.map(\.selector) == (0..<205).map { "HEAD@{\($0)}" })
+        // A moved HEAD invalidates offsets, so a captured cursor must refuse instead of repeating entries.
+        try await f.git(["commit", "--allow-empty", "-m", "Between pages"])
+        await #expect(throws: GitError.self) { try await repository.reflog(after: cursor) }
+    }
+    @Test func fileHistoryPagesWithoutGapsOrDuplicates() async throws {
+        let f = try await GitFixture(); defer { f.remove() }
+        try f.write("history.txt", "0\n")
+        try await f.git(["add", "--", "history.txt"])
+        try await f.git(["commit", "-qm", "Revision 0"])
+        for number in 1...204 {
+            try f.write("history.txt", "\(number)\n")
+            try await f.git(["commit", "-aqm", "Revision \(number)"])
+        }
+        let repository = try await f.repository(), head = try #require(try await repository.snapshot().head)
+        let path = try GitPath("history.txt")
+        let first = try await repository.fileHistory(at: head, path: path)
+        #expect(first.entries.count == GitRepository.queryPageSize)
+        let cursor = try #require(first.nextCursor)
+        let second = try await repository.fileHistory(at: head, path: path, after: cursor)
+        #expect(second.entries.count == 5 && !second.hasMore)
+        let all = first.entries + second.entries
+        #expect(all.count == 205 && Set(all.map(\.id)).count == 205)
+        #expect(all.first?.commit.subject == "Revision 204")
+        #expect(all.last?.commit.subject == "Revision 0")
+        await #expect(throws: GitError.self) {
+            try await repository.fileHistory(at: head, path: try GitPath("other.txt"), after: cursor)
+        }
+    }
     @Test func immutableAndWorktreeComparisonAreDistinct() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         let repo = try await f.repository(), head = try #require(try await repo.snapshot().head)

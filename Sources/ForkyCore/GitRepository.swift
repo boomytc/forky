@@ -8,6 +8,9 @@ public struct GitRepository: Sendable {
     public let gitDirectory: URL
     public let commonDirectory: URL
     public static let historyPageSize = 200
+    /// Page size for reflog and file-history listings; each page probes one extra record
+    /// so "has more" never guesses.
+    public static let queryPageSize = 200
 
     private init(root: URL, runner: GitProcessRunner, gate: AsyncGate, gitDirectory: URL, commonDirectory: URL) {
         self.root = root; self.runner = runner; self.gate = gate

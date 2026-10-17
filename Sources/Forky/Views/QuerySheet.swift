@@ -13,7 +13,10 @@ struct QuerySheet: View {
     @State private var worktree = false
     @State private var reflog: [ReflogEntry] = []
     @State private var revisions: [FileRevision] = []
-    @State private var more = false
+    @State private var reflogCursor: ReflogCursor?
+    @State private var fileCursor: FileHistoryCursor?
+    @State private var loadingMore = false
+    @State private var pageWentStale = false
     @State private var loadID = UUID()
     var body: some View {
         if request.tool == .statistics { StatisticsSheet(request: request, store: store) }
@@ -61,7 +64,7 @@ struct QuerySheet: View {
                         }
                     }
                 } else { SourceTextView(text: text, identifier: "queryResult") }
-                if more { Text("Showing the first 200 records. Open a narrower/older anchor for more; this is not complete history.").font(.caption).foregroundStyle(.orange).padding(8) }
+                if request.tool == .reflog || request.tool == .fileHistory { pagingFooter }
             }
         } actions: {
             Button("Close") { store.sheet = nil }.keyboardShortcut(.cancelAction)
@@ -87,8 +90,30 @@ struct QuerySheet: View {
             }.fixedSize()
         }
     }
+    @ViewBuilder private var pagingFooter: some View {
+        if pageWentStale {
+            HStack(spacing: 8) {
+                Text("HEAD moved after this page was read, so older positions no longer line up.")
+                    .font(.caption).foregroundStyle(.orange)
+                Spacer()
+                Button("Reload From Newest") { pageWentStale = false; loadID = UUID() }
+                    .accessibilityIdentifier("queryReloadNewest")
+            }.padding(8)
+        } else if reflogCursor != nil || fileCursor != nil {
+            HStack(spacing: 8) {
+                Text("Older records are loaded on request; the list is not proof of complete history.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if loadingMore { ProgressView().controlSize(.small) }
+                Button("Load Older") { Task { await loadMore() } }
+                    .disabled(loadingMore || busy)
+                    .accessibilityIdentifier("queryLoadOlder")
+            }.padding(8)
+        }
+    }
     private func load() async {
-        busy = true; failure = nil; more = false
+        busy = true; failure = nil; pageWentStale = false
+        reflogCursor = nil; fileCursor = nil
         do {
             switch request.tool {
             case .statistics: busy = false; return
@@ -97,11 +122,11 @@ struct QuerySheet: View {
                 try Task.checkCancellation(); text = value
             case .reflog:
                 let page = try await request.repository.reflog()
-                try Task.checkCancellation(); reflog = page.entries; more = page.hasMore
+                try Task.checkCancellation(); reflog = page.entries; reflogCursor = page.nextCursor
             case .fileHistory:
                 guard let oid = request.oid, !path.isEmpty else { busy = false; return }
                 let page = try await request.repository.fileHistory(at: oid, path: GitPath(path))
-                try Task.checkCancellation(); revisions = page.entries; more = page.hasMore
+                try Task.checkCancellation(); revisions = page.entries; fileCursor = page.nextCursor
             case .compare:
                 guard !from.isEmpty, worktree || !to.isEmpty else { busy = false; return }
                 let comparison = try await request.repository.compare(from: from, to: worktree ? nil : to)
@@ -110,5 +135,33 @@ struct QuerySheet: View {
             }
             try Task.checkCancellation(); busy = false
         } catch is CancellationError {} catch { busy = false; failure = error.localizedDescription }
+    }
+    private func loadMore() async {
+        guard !busy, !loadingMore else { return }
+        loadingMore = true; failure = nil
+        do {
+            switch request.tool {
+            case .reflog:
+                guard let cursor = reflogCursor else { loadingMore = false; return }
+                do {
+                    let page = try await request.repository.reflog(after: cursor)
+                    try Task.checkCancellation()
+                    let known = Set(reflog.map(\.id))
+                    reflog.append(contentsOf: page.entries.filter { !known.contains($0.id) })
+                    reflogCursor = page.nextCursor
+                } catch GitError.staleRepository {
+                    pageWentStale = true
+                }
+            case .fileHistory:
+                guard let cursor = fileCursor, let oid = request.oid, !path.isEmpty else { loadingMore = false; return }
+                let page = try await request.repository.fileHistory(at: oid, path: GitPath(path), after: cursor)
+                try Task.checkCancellation()
+                let known = Set(revisions.map(\.id))
+                revisions.append(contentsOf: page.entries.filter { !known.contains($0.id) })
+                fileCursor = page.nextCursor
+            default: break
+            }
+        } catch is CancellationError {} catch { failure = error.localizedDescription }
+        loadingMore = false
     }
 }

@@ -14,18 +14,32 @@ public struct ReflogEntry: Identifiable, Sendable {
     public let oid: String, selector: String, message: String
     public var id: String { selector + ":" + oid }
 }
+/// Reflog positions are only stable while HEAD stays at the same commit. The cursor
+/// captures that commit so an older page cannot silently duplicate or skip entries.
+public struct ReflogCursor: Sendable {
+    let head: String?
+    let offset: Int
+}
 public struct ReflogPage: Sendable {
     public let entries: [ReflogEntry]
-    public let hasMore: Bool
+    public let nextCursor: ReflogCursor?
+    public var hasMore: Bool { nextCursor != nil }
 }
 public struct FileRevision: Identifiable, Sendable {
     public let commit: GitCommit
     public let path: GitPath
     public var id: String { commit.oid }
 }
+/// File history pages over one immutable anchor commit, so a later page cannot drift.
+public struct FileHistoryCursor: Sendable {
+    let oid: String
+    let path: GitPath
+    let offset: Int
+}
 public struct FileHistoryPage: Sendable {
     public let entries: [FileRevision]
-    public let hasMore: Bool
+    public let nextCursor: FileHistoryCursor?
+    public var hasMore: Bool { nextCursor != nil }
 }
 public struct CommitComparison: Sendable {
     public let from: String
@@ -34,10 +48,19 @@ public struct CommitComparison: Sendable {
     public let patch: String
 }
 extension GitRepository {
-    public func reflog() async throws -> ReflogPage {
+    public func reflog(after cursor: ReflogCursor? = nil) async throws -> ReflogPage {
         try await gate.withPermit {
-            let fields = try GitParsers.terminatedFields(try await command(["reflog", "show", "-z",
-                "--max-count=201", "--format=%H%x00%gD%x00%gs", "HEAD"]).stdout)
+            // Capture before reading so a HEAD move during the read is detectable, not baked into the next page.
+            let head = try await headOID()
+            let offset: Int
+            if let cursor {
+                guard cursor.offset >= 0, cursor.offset <= 1_000_000 else { throw GitError.malformedOutput("Invalid reflog offset.") }
+                guard cursor.head == head else { throw GitError.staleRepository }
+                offset = cursor.offset
+            } else { offset = 0 }
+            let output = try await command(["reflog", "show", "-z", "--skip=\(offset)",
+                "--max-count=\(Self.queryPageSize + 1)", "--format=%H%x00%gD%x00%gs", "HEAD"])
+            let fields = try GitParsers.terminatedFields(output.stdout)
             guard fields.count.isMultiple(of: 3) else { throw GitError.malformedOutput("Incomplete reflog records.") }
             var entries: [ReflogEntry] = []
             for i in stride(from: 0, to: fields.count, by: 3) {
@@ -45,7 +68,11 @@ extension GitRepository {
                 guard GitParsers.isOID(oid), selector.hasPrefix("HEAD@{") else { throw GitError.malformedOutput("Invalid reflog identity.") }
                 entries.append(ReflogEntry(oid: oid, selector: selector, message: try GitParsers.string(fields[i + 2])))
             }
-            return ReflogPage(entries: Array(entries.prefix(200)), hasMore: entries.count > 200)
+            guard try await headOID() == head else { throw GitError.staleRepository }
+            let page = Array(entries.prefix(Self.queryPageSize))
+            let next = entries.count > Self.queryPageSize
+                ? ReflogCursor(head: head, offset: offset + page.count) : nil
+            return ReflogPage(entries: page, nextCursor: next)
         }
     }
     public func compare(from: String, to: String?, path: GitPath? = nil) async throws -> CommitComparison {
@@ -59,10 +86,18 @@ extension GitRepository {
             return CommitComparison(from: from, to: to, files: files, patch: patch)
         }
     }
-    public func fileHistory(at oid: String, path: GitPath) async throws -> FileHistoryPage {
+    public func fileHistory(at oid: String, path: GitPath, after cursor: FileHistoryCursor? = nil) async throws -> FileHistoryPage {
         guard GitParsers.isOID(oid) else { throw GitError.staleRepository }
+        let offset: Int
+        if let cursor {
+            guard cursor.oid == oid, cursor.path == path else {
+                throw GitError.malformedOutput("File-history cursor belongs to another query.")
+            }
+            guard cursor.offset >= 0, cursor.offset <= 1_000_000 else { throw GitError.malformedOutput("Invalid file-history offset.") }
+            offset = cursor.offset
+        } else { offset = 0 }
         return try await gate.withPermit {
-            let data = try await command(["log", "--follow", "--max-count=201", "--name-status", "-z",
+            let data = try await command(["log", "--follow", "--skip=\(offset)", "--max-count=\(Self.queryPageSize + 1)", "--name-status", "-z",
                 "--no-ext-diff", "--no-textconv", "--format=%x00%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x00%b",
                 oid, "--", path.value], literalPaths: true).stdout
             let fields = data.split(separator: 0, omittingEmptySubsequences: false).map(Data.init)
@@ -91,7 +126,10 @@ extension GitRepository {
                 }
                 entries.append(FileRevision(commit: commit, path: pathAtCommit))
             }
-            return FileHistoryPage(entries: Array(entries.prefix(200)), hasMore: entries.count > 200)
+            let page = Array(entries.prefix(Self.queryPageSize))
+            let next = entries.count > Self.queryPageSize
+                ? FileHistoryCursor(oid: oid, path: path, offset: offset + page.count) : nil
+            return FileHistoryPage(entries: page, nextCursor: next)
         }
     }
     public func text(at oid: String, path: GitPath) async throws -> String {

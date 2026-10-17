@@ -80,8 +80,9 @@ session previews. Push never silently includes unselected refs or force options.
 Process output: 4 MiB/stream; deadlines 30 s local, 300 s transport/history tools, 900 s
 creation. Display diffs preview 500,000 characters with a truncation marker; selectable
 patches must be complete (20,000 lines). Conflict editing ≤4 MiB/file, retained drafts
-16 MiB/session. Rebase/bisect review ≤200 commits; blame ≤20,000 rows. File history/reflog
-show a marked first 200 records. Oversize/unknown input is not an empty successful result.
+16 MiB/session. Rebase/bisect review ≤200 commits; blame ≤20,000 rows. File history and
+reflog load 200 records per page on request; the sheet states that loaded rows are not
+proof of complete history. Oversize/unknown input is not an empty successful result.
 
 Deliberate remaining exclusions: partial rename/type/mode/binary edits, complex conflict
 types, merge-preserving/arbitrary-exec rebase, syntax/word diff, built-in service accounts
