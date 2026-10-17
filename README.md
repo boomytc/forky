@@ -49,7 +49,8 @@ Tools → Git Settings can select another executable and explicit helper PATH.
 - Submodule status with structured gitlink rows, ahead/behind and per-row update/open;
   bring-your-own LFS status/tracking/network/locks with a structured lock list.
 - Local overview/statistics, manual bisect, bring-your-own Gitflow and explicit trusted
-  executable/JSON-argv tools, including optional AI draft generation.
+  executable/JSON-argv tools with a saved command library, `{path}`/`{revision}`/`{repository}`
+  literal substitution and file context-menu handoff, including optional AI draft generation.
 
 Use the **Tools** menu for secondary workflows. History context actions use the clicked
 commit, not the old selection. Every action has a real handler or explicit unavailable

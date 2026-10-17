@@ -89,7 +89,7 @@ struct HistoryView: View {
                                                 Text(file.path.value).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
                                             }
                                             .tag(file.id).help(file.originalPath.map { "\($0.value) → \(file.path.value)" } ?? file.path.value)
-                                            .contextMenu { FileContextActions(root: store.repository?.root, path: file.path) }
+                                            .contextMenu { FileContextActions(root: store.repository?.root, path: file.path, store: store) }
                                         }
                                     }
                                     .listStyle(.inset).environment(\.defaultMinListRowHeight, 25)

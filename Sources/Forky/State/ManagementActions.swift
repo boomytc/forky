@@ -21,6 +21,12 @@ struct ManagementRequest: Identifiable {
     let initialTool: ManagementTool
     let commitOID: String?
     let path: GitPath?
+    let customCommandID: UUID?
+    init(repository: GitRepository, expected: RepositorySnapshot, initialTool: ManagementTool,
+         commitOID: String?, path: GitPath?, customCommandID: UUID? = nil) {
+        self.repository = repository; self.expected = expected; self.initialTool = initialTool
+        self.commitOID = commitOID; self.path = path; self.customCommandID = customCommandID
+    }
 }
 extension RepositoryStore {
     func performTool(_ request: ManagementRequest, title: String,
@@ -38,6 +44,14 @@ extension RepositoryStore {
         sheet = .management(ManagementRequest(repository: repository, expected: snapshot, initialTool: tool,
                                                commitOID: selectedCommit?.oid ?? snapshot.head,
                                                path: selectedChange.flatMap { try? GitPath($0.path) } ?? commitFiles.first { $0.id == selectedCommitFileID }?.path))
+    }
+    /// Opens the trusted-tool sheet with the selected path available to `{path}` placeholders.
+    func requestExternalTool(path: GitPath? = nil, commandID: UUID? = nil) {
+        guard canWrite, let repository, let snapshot else { return }
+        sheet = .management(ManagementRequest(repository: repository, expected: snapshot, initialTool: .external,
+                                               commitOID: selectedCommit?.oid ?? snapshot.head,
+                                               path: path ?? selectedChange.flatMap { try? GitPath($0.path) },
+                                               customCommandID: commandID))
     }
     func performManagement(_ request: ManagementRequest, title: String,
                            operation: @escaping @Sendable (GitRepository) async throws -> Void) {

@@ -62,7 +62,7 @@ struct ChangesView: View {
         Section {
             ForEach(files) { change in
                 ChangeRow(change: change, side: side, enabled: store.canWrite,
-                          root: store.repository?.root) {
+                          root: store.repository?.root, store: store) {
                     if side == .worktree { store.stage(change) } else { store.unstage(change) }
                 }
                 .tag(ChangeSelection(path: change.id, side: side))
@@ -87,6 +87,7 @@ private struct ChangeRow: View {
     let side: DiffSide
     let enabled: Bool
     let root: URL?
+    let store: RepositoryStore?
     let action: () -> Void
     private var code: String { change.isConflict ? "!" : (change.isUntracked ? "?" : String(side == .staged ? change.index : change.worktree)) }
     private var color: Color { change.isConflict ? .orange : (code == "D" ? .red : (code == "A" || code == "?" ? .green : .secondary)) }
@@ -113,7 +114,7 @@ private struct ChangeRow: View {
         .contextMenu {
             Button(side == .worktree ? "Stage File" : "Unstage File", action: action).disabled(!enabled)
             Divider()
-            FileContextActions(root: root, path: change.path)
+            FileContextActions(root: root, path: change.path, store: store)
         }
     }
 }

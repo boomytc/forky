@@ -25,6 +25,15 @@ struct FilterField: View {
 struct FileContextActions: View {
     let root: URL?
     let path: GitPath
+    let store: RepositoryStore?
+
+    init(root: URL?, path: GitPath, store: RepositoryStore? = nil) {
+        self.root = root; self.path = path; self.store = store
+    }
+
+    private var savedTools: [CustomCommand] {
+        (store?.customCommands ?? []).filter { $0.scope == .file || $0.scope == .repository }
+    }
 
     var body: some View {
         Button("Reveal in Finder", systemImage: "folder") {
@@ -33,6 +42,14 @@ struct FileContextActions: View {
         Button("Copy Relative Path", systemImage: "doc.on.doc") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path.value, forType: .string)
+        }
+        if !savedTools.isEmpty, let store {
+            Divider()
+            Menu("Saved Tools") {
+                ForEach(savedTools) { command in
+                    Button(command.name) { store.requestExternalTool(path: path, commandID: command.id) }
+                }
+            }
         }
     }
 }

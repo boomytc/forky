@@ -20,6 +20,9 @@ struct ExtendedManagementSheet: View {
     @State private var selectedFiles = Set<String>()
     @State private var selectedRefs = Set<String>()
     @State private var selectedRemotes = Set<String>()
+    @State private var commandID = ""
+    @State private var saveName = ""
+    @State private var saveScope = CustomCommandScope.repository
     @State private var worktrees: [GitWorktree] = []
     @State private var settings: [GitSetting] = []
     @State private var patch: PatchImport?
@@ -94,7 +97,14 @@ struct ExtendedManagementSheet: View {
             Button("Apply Reviewed Action", action: perform).buttonStyle(.borderedProminent)
                 .disabled(!approved || busy || !store.canWrite || isReadOnly || !validInputs).accessibilityIdentifier("extendedConfirm")
         }
-        .task { action = variants.first ?? ""; loadID = UUID() }
+        .task {
+            action = variants.first ?? ""
+            if tool == .external, let id = request.customCommandID {
+                commandID = id.uuidString
+                loadCommand(commandID)
+            }
+            loadID = UUID()
+        }
         .task(id: loadID) { await inspect() }
         .task(id: openID) {
             guard openRequested else { return }
@@ -260,6 +270,30 @@ struct ExtendedManagementSheet: View {
             Text("Current HEAD: " + (request.expected.head ?? "(none)") + ". Native bisect can checkout another commit. Up to 200 candidate commits are reviewed for ignored obstructions. Reset returns to the captured original branch/commit; it is not a general undo.")
         case .external:
             AbsolutePathField(title: "Absolute trusted executable", value: $value, selection: .executable)
+            if action == "Custom Tool" {
+                Picker("Saved command", selection: $commandID) {
+                    Text("Unsaved").tag("")
+                    ForEach(store.customCommands) { Text($0.name).tag($0.id.uuidString) }
+                }.accessibilityIdentifier("savedCommandPicker")
+                .onChange(of: commandID) { _, value in loadCommand(value) }
+                HStack(spacing: 8) {
+                    TextField("Command name", text: $saveName).textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("savedCommandName")
+                    Picker("Scope", selection: $saveScope) {
+                        ForEach(CustomCommandScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }.frame(maxWidth: 160)
+                    Button("Save Command") { saveCommand() }
+                        .disabled(saveName.trimmingCharacters(in: .whitespaces).isEmpty || !value.hasPrefix("/"))
+                        .accessibilityIdentifier("savedCommandSave")
+                    if UUID(uuidString: commandID) != nil {
+                        Button("Delete Saved", role: .destructive) {
+                            if let id = UUID(uuidString: commandID) { store.deleteCustomCommand(id: id) }
+                            commandID = ""
+                        }
+                    }
+                }
+                Text("Placeholders: {path}, {revision}, {repository}. Substitution is literal, never a shell expression; a missing selection refuses to run.")
+            }
             Text("JSON argument array. {input_file} is replaced as one argv value, never a shell expression.")
             TextEditor(text: $argv).font(.system(.caption, design: .monospaced)).frame(height: 65)
             if action == "AI Draft" {
@@ -424,13 +458,40 @@ struct ExtendedManagementSheet: View {
                     run("Bisect " + action) { try await $0.stepBisect(step, expected: expected) }
                 }
             case .external:
-                let args = try JSONDecoder().decode([String].self, from: Data(argv.utf8)), payload = input
-                run("Running explicitly trusted tool") { try await $0.runTrustedTool(executable: (try LocalFilePath.absolute(value)), arguments: args, input: payload, expected: expected) }
+                let rawArgs = try JSONDecoder().decode([String].self, from: Data(argv.utf8)), payload = input
+                // Placeholders apply only to saved custom tools. AI drafts keep literal braces from the diff.
+                let context = CustomCommandContext(path: request.path?.value, repository: expected.root.path,
+                                                   revision: request.commitOID)
+                let args = action == "Custom Tool" ? try rawArgs.map { try CustomCommandSubstitution.resolve($0, context: context) } : rawArgs
+                let stdin = action == "Custom Tool" ? try CustomCommandSubstitution.resolve(payload, context: context) : payload
+                run("Running explicitly trusted tool") { try await $0.runTrustedTool(executable: (try LocalFilePath.absolute(value)), arguments: args, input: stdin, expected: expected) }
             default: break
             }
         } catch { failure = error.localizedDescription }
     }
     private func run(_ title: String, operation: @escaping @Sendable (GitRepository) async throws -> String) {
         store.performTool(request, title: title, operation: operation)
+    }
+    private func loadCommand(_ id: String) {
+        guard let uuid = UUID(uuidString: id), let command = store.customCommands.first(where: { $0.id == uuid }) else { return }
+        value = command.executable
+        argv = (try? JSONEncoder().encode(command.arguments)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        input = command.input
+        saveName = command.name
+        saveScope = command.scope
+        approved = false
+    }
+    private func saveCommand() {
+        do {
+            let args = try JSONDecoder().decode([String].self, from: Data(argv.utf8))
+            let command = try CustomCommandArchive.make(name: saveName, scope: saveScope, executable: value,
+                                                        arguments: args, input: input,
+                                                        existing: store.customCommands, updating: UUID(uuidString: commandID))
+            try store.saveCustomCommand(command)
+            commandID = command.id.uuidString
+            saveName = command.name
+            failure = nil
+            approved = false
+        } catch { failure = error.localizedDescription }
     }
 }

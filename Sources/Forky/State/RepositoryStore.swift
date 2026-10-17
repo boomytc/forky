@@ -76,6 +76,7 @@ final class RepositoryStore {
     private(set) var commitCompositionNote: String?
     @ObservationIgnored private var commitCompositionLoaded = false
     private static let signOffDefaultPrefix = "forky.commitSignOff."
+    private(set) var customCommands: [CustomCommand] = []
     var notice: AppNotice?
     var lastToolOutput: String?
     var lastToolBody: String?
@@ -113,6 +114,10 @@ final class RepositoryStore {
             explicitHelperPATH = UserDefaults.standard.string(forKey: "forky.helperPATH") ?? ""
             if let data = UserDefaults.standard.data(forKey: "forky.commitDrafts") {
                 drafts = CommitDraftArchive.decode(data)
+            }
+            if let data = UserDefaults.standard.data(forKey: "forky.customCommands"),
+               let saved = try? CustomCommandArchive.decode(data) {
+                customCommands = saved
             }
         }
     }
@@ -589,6 +594,19 @@ final class RepositoryStore {
 
     /// The sign-off choice is Forky's own repository-scoped default; Git has no commit
     /// sign-off configuration key (`format.signoff` only affects `format-patch`).
+    func saveCustomCommand(_ command: CustomCommand) throws {
+        customCommands = try CustomCommandArchive.upserting(customCommands, command: command)
+        persistCustomCommands()
+    }
+    func deleteCustomCommand(id: UUID) {
+        customCommands = CustomCommandArchive.removing(customCommands, id: id)
+        persistCustomCommands()
+    }
+    private func persistCustomCommands() {
+        guard !testing, let data = try? CustomCommandArchive.encode(customCommands) else { return }
+        UserDefaults.standard.set(data, forKey: "forky.customCommands")
+    }
+
     func updateCommitSignOff(_ value: Bool) {
         commitSignOff = value
         guard !testing, let path = repository?.root.path else { return }
