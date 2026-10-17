@@ -67,7 +67,9 @@ final class RepositoryStore {
     private(set) var snapshotIsCurrent = false
     private(set) var activity = "Ready"
     private(set) var recentPaths: [String] = []
-    var commitMessage = ""
+    var commitMessage = "" {
+        didSet { scheduleDraftPersist() }
+    }
     var commitSignOff = false
     private(set) var commitTemplateText: String?
     private(set) var commitTemplateLabel: String?
@@ -94,11 +96,14 @@ final class RepositoryStore {
     @ObservationIgnored private var bootstrapped = false
     @ObservationIgnored private var historyCursor: HistoryCursor?
     @ObservationIgnored private var drafts: [String: String] = [:]
+    @ObservationIgnored private var draftPersistTask: Task<Void, Never>?
     @ObservationIgnored private var diskGeneration = 0
     @ObservationIgnored private var monitor: RepositoryMonitor?
     @ObservationIgnored private var monitorTask: Task<Void, Never>?
     var monitorWarning: String?
     var editDrafts: [String: String] = [:]
+    /// App-level hook for bounded session persistence; Git never depends on it.
+    var onRepositoryOpened: ((URL) -> Void)?
     @ObservationIgnored private let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
 
     init() {
@@ -106,6 +111,9 @@ final class RepositoryStore {
             recentPaths = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? []
             gitExecutablePath = UserDefaults.standard.string(forKey: "forky.gitExecutable") ?? "/usr/bin/git"
             explicitHelperPATH = UserDefaults.standard.string(forKey: "forky.helperPATH") ?? ""
+            if let data = UserDefaults.standard.data(forKey: "forky.commitDrafts") {
+                drafts = CommitDraftArchive.decode(data)
+            }
         }
     }
 
@@ -189,9 +197,14 @@ final class RepositoryStore {
                 let snapshot = try await repository.snapshot()
                 try Task.checkCancellation()
                 guard sessionID == session else { return }
-                if let previous = self.repository { drafts[previous.root.path] = commitMessage }
+                if let previous = self.repository {
+                    if commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { drafts[previous.root.path] = nil }
+                    else { drafts[previous.root.path] = commitMessage }
+                    persistDrafts()
+                }
                 self.repository = repository
                 self.snapshot = snapshot
+                onRepositoryOpened?(repository.root)
                 snapshotIsCurrent = observedGeneration == diskGeneration
                 section = .changes; historyBack = []
                 commits = []; commitFiles = []; selectedCommitID = nil; selectedCommitFileID = nil
@@ -555,6 +568,23 @@ final class RepositoryStore {
         } catch {
             commitCompositionNote = "Commit template is unavailable: " + error.localizedDescription
         }
+    }
+
+    private func scheduleDraftPersist() {
+        guard !testing, let repository else { return }
+        let path = repository.root.path, text = commitMessage
+        draftPersistTask?.cancel()
+        draftPersistTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self.drafts[path] = nil }
+            else { self.drafts[path] = text }
+            self.persistDrafts()
+        }
+    }
+    private func persistDrafts() {
+        guard !testing, let data = CommitDraftArchive.encode(drafts) else { return }
+        UserDefaults.standard.set(data, forKey: "forky.commitDrafts")
     }
 
     /// The sign-off choice is Forky's own repository-scoped default; Git has no commit

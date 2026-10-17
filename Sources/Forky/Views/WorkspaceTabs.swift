@@ -1,7 +1,10 @@
 import SwiftUI
+import ForkyCore
 
 struct WorkspaceTabs: View {
     @Bindable var hub: WorkspaceHub
+    @State private var renameTarget: SavedWorkspace?
+    @State private var renameText = ""
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 3) {
@@ -36,13 +39,29 @@ struct WorkspaceTabs: View {
                     }
                     Divider()
                     Button("Save Open Repositories as Workspace") { hub.saveWorkspace(name: "Workspace " + String(hub.workspaces.count + 1)) }
+                        .accessibilityIdentifier("workspaceSaveCurrent")
                     ForEach(hub.workspaces) { workspace in
                         Menu(workspace.name) {
                             Button("Open in New Tabs") { hub.openWorkspace(workspace) }
+                            Button("Replace with Open Tabs") { hub.replaceWorkspacePaths(workspace.id) }
+                            Button("Rename…") { renameTarget = workspace; renameText = workspace.name }
+                                .accessibilityIdentifier("workspaceRename")
+                            Button("Move Up") { hub.moveWorkspace(workspace.id, up: true) }
+                            Button("Move Down") { hub.moveWorkspace(workspace.id, up: false) }
+                            Divider()
                             Button("Delete Saved Workspace", role: .destructive) { hub.deleteWorkspace(workspace.id) }
                         }
                     }
                 } label: { Image(systemName: "square.stack.3d.up") }.menuStyle(.borderlessButton).fixedSize()
+                    .accessibilityIdentifier("workspaceMenu")
+                    .alert("Rename Workspace", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
+                        TextField("Name", text: $renameText).accessibilityIdentifier("workspaceRenameField")
+                        Button("Rename") {
+                            if let target = renameTarget { hub.renameWorkspace(target.id, to: renameText) }
+                            renameTarget = nil
+                        }.accessibilityIdentifier("workspaceRenameConfirm")
+                        Button("Cancel", role: .cancel) { renameTarget = nil }
+                    } message: { Text("Trimmed, at most 80 characters, no control characters.") }
             }.font(.system(size: 11)).padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
             WorkspaceView(store: hub.selected.store).id(hub.selected.id)
@@ -50,5 +69,6 @@ struct WorkspaceTabs: View {
         .alert("Workspace", isPresented: Binding(get: { hub.notice != nil }, set: { if !$0 { hub.notice = nil } })) {
             Button("OK") { hub.notice = nil }
         } message: { Text(hub.notice ?? "") }
+        .task { hub.restoreTabsIfNeeded() }
     }
 }

@@ -508,6 +508,39 @@ final class ForkyUITests: XCTestCase {
         XCTAssertFalse(content.contains("<<<<<<<"), content)
     }
 
+    func testWorkspaceSaveRenameAndReorder() throws {
+        try prepare()
+        XCTAssertTrue(app.staticTexts["currentBranch"].waitForExistence(timeout: 15), app.debugDescription)
+        let menu = app.menuButtons["workspaceMenu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        menu.click()
+        app.menuItems["Save Open Repositories as Workspace"].click()
+        menu.click()
+        let saved = app.menuItems["Workspace 1"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), app.debugDescription)
+        saved.hover()
+        let rename = app.menuItems["Rename…"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5), app.debugDescription)
+        rename.click()
+        let field = app.sheets.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        field.click()
+        for _ in 0..<24 { field.typeKey(.delete, modifierFlags: []) }
+        typeUppercase("RENAMED", into: field)
+        app.sheets.buttons["workspaceRenameConfirm"].click()
+        waitFor(NSPredicate(format: "exists == false"), object: app.sheets.firstMatch)
+        menu.click()
+        let renamed = app.menuItems["RENAMED"]
+        XCTAssertTrue(renamed.waitForExistence(timeout: 5), app.debugDescription)
+        renamed.hover()
+        let move = app.menuItems["Move Down"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
+        move.click()
+        menu.click()
+        XCTAssertTrue(app.menuItems["RENAMED"].waitForExistence(timeout: 5), app.debugDescription)
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
     func testCherryPickAndRevertSelectedCommit() throws {
         try prepare(modified: false)
         waitFor(NSPredicate(format: "enabled == true"), object: app.buttons["newBranch"], timeout: 15)

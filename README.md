@@ -19,7 +19,9 @@ Tools → Git Settings can select another executable and explicit helper PATH.
 
 ## Workflows
 
-- Independent repository tabs, recents, reopen-closed sessions and saved repository workspaces.
+- Independent repository tabs, recents, reopen-closed sessions, last-session tab restore (up to
+  four) and saved repository workspaces with rename, ordering, replace-with-open-tabs and bounded
+  persistence; commit drafts persist across launches.
 - Open linked worktrees/subdirectories; clone/init only into newly reserved directories.
 - Filesystem/foreground refresh, debounced invalidation and stale-state write protection.
 - Per-file, filtered batch, exact line/hunk and inline stage/unstage; explicit destructive
