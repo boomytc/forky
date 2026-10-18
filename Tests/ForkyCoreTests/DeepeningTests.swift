@@ -76,7 +76,33 @@ struct DeepeningTests {
         #expect(doc.previousUnresolvedID(before: 2, choices: [1: .theirs]) == 0)
         #expect(doc.previousUnresolvedID(before: 0, choices: [:]) == nil)
         #expect(doc.choices(.both).count == 3)
-        #expect(doc.progress(doc.choices(.base)) == ConflictProgress(resolved: 3, total: 3))
+        // No chunk in this document has a ``|||||||`` base section; choosing Base would
+        // leave the original markers in the rendered result, so it must stay unresolved.
+        #expect(doc.progress(doc.choices(.base)) == ConflictProgress(resolved: 0, total: 3))
+        #expect(doc.nextUnresolvedID(after: nil, choices: doc.choices(.base)) == 0)
+    }
+    @Test func conflictBaseChoiceRequiresABaseSection() throws {
+        let withoutBase = try ConflictDocument("""
+        <<<<<<< ours
+        ours
+        =======
+        theirs
+        >>>>>>> theirs
+        """)
+        #expect(withoutBase.progress([0: .base]) == ConflictProgress(resolved: 0, total: 1))
+        #expect(withoutBase.render([0: .base]).contains("<<<<<<<"))
+
+        let withBase = try ConflictDocument("""
+        <<<<<<< ours
+        ours
+        ||||||| base
+        base
+        =======
+        theirs
+        >>>>>>> theirs
+        """)
+        #expect(withBase.progress([0: .base]) == ConflictProgress(resolved: 1, total: 1))
+        #expect(withBase.render([0: .base]) == "base\n")
     }
     @Test func rebaseBackupAndExplicitUpdateRefs() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
@@ -119,13 +145,27 @@ struct DeepeningTests {
         #expect(try String(contentsOf: f.root.appendingPathComponent("local"), encoding: .utf8) == "do not overwrite")
         #expect(try await repo.snapshot().collaboration.value?.stashes.count == 1)
     }
-    @Test func statisticsUseCompleteFrozenRootsAndMediaDistinguishesAbsence() async throws {
+    @Test func statisticsCountAndMissingImageAreReported() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         let repo = try await f.repository(), head = try #require(try await repo.snapshot().head)
         let stats = try await repo.statistics()
         #expect(stats.total == 1 && stats.months.reduce(0) { $0 + $1.count } == 1)
         let absent = try await repo.imageComparison(from: head, to: head, path: GitPath("missing.png"))
         #expect(absent.before == nil && absent.after == nil)
+    }
+    @Test func imageComparisonReadsBlobsBeyondTheTextOutputBudget() async throws {
+        let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
+        let payload = Data(repeating: 0x89, count: 4 * 1024 * 1024 + 1024)
+        try payload.write(to: f.root.appendingPathComponent("large.png"))
+        try await f.git(["add", "--", "large.png"]); try await f.git(["commit", "-m", "Large image"])
+        let repo = try await f.repository(), head = try #require(try await repo.snapshot().head)
+        let committed = try await repo.imageComparison(from: head, to: head, path: GitPath("large.png"))
+        #expect(committed.before?.count == payload.count && committed.after?.count == payload.count)
+
+        let working = Data(repeating: 0x42, count: 4 * 1024 * 1024 + 2048)
+        try working.write(to: f.root.appendingPathComponent("large.png"))
+        let worktree = try await repo.imageComparison(from: head, to: nil, path: GitPath("large.png"))
+        #expect(worktree.after?.count == working.count)
     }
     @Test func externalInputFileIsLiteralData() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()

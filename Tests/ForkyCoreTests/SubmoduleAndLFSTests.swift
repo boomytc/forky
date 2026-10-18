@@ -7,35 +7,43 @@ struct SubmoduleAndLFSTests {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         let child = f.directory.appendingPathComponent("child", isDirectory: true)
         try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
-        _ = try await f.runner.run(["init", "-b", "main", child.path])
+        _ = try await f.git(["init", "-b", "main", child.path])
         for (key, value) in [("user.name", "Child"), ("user.email", "child@example.invalid"),
                              ("commit.gpgSign", "false"), ("core.hooksPath", "/dev/null")] {
-            _ = try await f.runner.run(["-C", child.path, "config", key, value])
+            try await f.git(["-C", child.path, "config", key, value])
         }
         try Data("one\n".utf8).write(to: child.appendingPathComponent("file.txt"))
-        _ = try await f.runner.run(["-C", child.path, "add", "file.txt"])
-        _ = try await f.runner.run(["-C", child.path, "commit", "-m", "Child one"])
+        try await f.git(["-C", child.path, "add", "file.txt"])
+        try await f.git(["-C", child.path, "commit", "-m", "Child one"])
         try await f.git(["-c", "protocol.file.allow=always", "submodule", "add", "--", child.path, "sub"])
         try await f.git(["commit", "-m", "Add submodule"])
         let repository = try await f.repository()
         let initial = try await repository.submoduleStatuses()
+        let initialEntry = try #require(initial.entries.first)
         #expect(initial.entries.count == 1)
-        #expect(initial.entries[0].path.value == "sub")
-        #expect(initial.entries[0].state == .upToDate)
-        #expect(initial.entries[0].ahead == 0 && initial.entries[0].behind == 0)
+        #expect(initialEntry.path.value == "sub")
+        #expect(initialEntry.state == .upToDate)
+        #expect(initialEntry.ahead == 0 && initialEntry.behind == 0)
 
         let sub = f.root.appendingPathComponent("sub")
         try Data("two\n".utf8).write(to: sub.appendingPathComponent("file.txt"))
-        _ = try await f.runner.run(["-C", sub.path, "commit", "-am", "Child two"])
+        try await f.git(["-C", sub.path, "commit", "-am", "Child two"])
         let advanced = try await repository.submoduleStatuses()
-        #expect(advanced.entries[0].state == .different)
-        #expect(advanced.entries[0].ahead == 1 && advanced.entries[0].behind == 0)
+        let advancedEntry = try #require(advanced.entries.first)
+        #expect(advancedEntry.state == .different)
+        #expect(advancedEntry.ahead == 1 && advancedEntry.behind == 0)
 
-        let oid = string(try await f.runner.run(["-C", child.path, "rev-parse", "HEAD"]).stdout)
+        let oid = string(try await f.git(["-C", child.path, "rev-parse", "HEAD"]).stdout)
         try await f.git(["update-index", "--add", "--cacheinfo", "160000,\(oid),ghost"])
         let withGhost = try await repository.submoduleStatuses()
         let ghost = try #require(withGhost.entries.first { $0.path.value == "ghost" })
-        #expect(ghost.state == .uninitialized && ghost.checkedOutOID == nil)
+        #expect(ghost.state == .uninitialized && ghost.checkedOutOID == nil && ghost.recordedOID == oid)
+
+        // A leftover empty directory must not make `git -C` discover the parent repository.
+        try FileManager.default.createDirectory(at: f.root.appendingPathComponent("ghost"), withIntermediateDirectories: true)
+        let withEmptyDirectory = try await repository.submoduleStatuses()
+        let emptyGhost = try #require(withEmptyDirectory.entries.first { $0.path.value == "ghost" })
+        #expect(emptyGhost.state == .uninitialized && emptyGhost.checkedOutOID == nil)
     }
 
     @Test func lfsLocksParseArraysAndWrappedObjects() throws {
@@ -61,6 +69,8 @@ struct SubmoduleAndLFSTests {
         let oid = String(repeating: "ab", count: 32)
         let pointer = Data("version https://git-lfs.github.com/spec/v1\noid sha256:\(oid)\nsize 5\n".utf8)
         #expect(GitParsers.lfsPointer(pointer) == LFSPointer(oid: oid, size: 5))
+        let crlf = Data("version https://git-lfs.github.com/spec/v1\r\noid sha256:\(oid)\r\nsize 5\r\n".utf8)
+        #expect(GitParsers.lfsPointer(crlf) == LFSPointer(oid: oid, size: 5))
         #expect(GitParsers.lfsPointer(Data("hello".utf8)) == nil)
         #expect(GitParsers.lfsPointer(Data("version https://git-lfs.github.com/spec/v1\noid sha256:short\nsize 5\n".utf8)) == nil)
 

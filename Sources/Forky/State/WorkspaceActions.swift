@@ -6,7 +6,6 @@ struct RemoteRequest: Identifiable {
     let id = UUID()
     let action: RemoteAction
     let expected: RepositorySnapshot
-    let initialRemote: String?
 }
 enum StashAction { case save, apply(GitStash), drop(GitStash) }
 struct StashRequest: Identifiable {

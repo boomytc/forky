@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import ForkyCore
 
+private let availableGitLFS: String? = ["/opt/homebrew/bin/git-lfs", "/usr/local/bin/git-lfs", "/usr/bin/git-lfs"]
+    .first { FileManager.default.isExecutableFile(atPath: $0) }
+
 struct ProviderWorkflowTests {
     @Test func actualSubmoduleCloneOpenAndUpdate() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
@@ -24,16 +27,22 @@ struct ProviderWorkflowTests {
         let opened = try await repo.submoduleDirectory(GitPath("module"), expected: repo.snapshot())
         #expect(try DirectoryIdentity.read(opened) == DirectoryIdentity.read(f.root.appendingPathComponent("module")))
         try await repo.updateSubmodule(GitPath("module"), expected: repo.snapshot())
-        #expect(try await repo.submoduleStatus().contains("module"))
+        let statuses = try await repo.submoduleStatuses()
+        #expect(statuses.entries.contains { $0.path.value == "module" && $0.state == .upToDate })
+        let subHead = try await f.git(["-C", opened.path, "rev-parse", "HEAD"]).stdout
         try Data("dirty".utf8).write(to: opened.appendingPathComponent("file"))
         await #expect(throws: GitError.self) { try await repo.updateSubmodule(GitPath("module"), expected: repo.snapshot()) }
+        #expect(try await f.git(["-C", opened.path, "rev-parse", "HEAD"]).stdout == subHead)
+        #expect(try String(contentsOf: opened.appendingPathComponent("file"), encoding: .utf8) == "dirty")
     }
 
-    @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/git-lfs")))
+    @Test(.enabled(if: availableGitLFS != nil))
     func actualLocalLFSFilterTrackAndStatus() async throws {
+        guard let lfs = availableGitLFS else { return }
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
+        let lfsDirectory = (lfs as NSString).deletingLastPathComponent
         let runner = GitProcessRunner(environment: ["HOME": f.directory.appendingPathComponent("home").path,
-            "XDG_CONFIG_HOME": f.directory.appendingPathComponent("home").path, "PATH": "/opt/homebrew/bin:/usr/bin:/bin"])
+            "XDG_CONFIG_HOME": f.directory.appendingPathComponent("home").path, "PATH": lfsDirectory + ":/usr/bin:/bin"])
         func git(_ args: [String]) async throws -> GitProcessResult {
             let result = try await runner.run(["-C", f.root.path] + args)
             guard result.status == 0 else { throw GitError.commandFailed(result.status, String(decoding: result.stderr, as: UTF8.self)) }

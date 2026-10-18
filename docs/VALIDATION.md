@@ -1,10 +1,38 @@
 # Validation — G01–G22 follow-up
 
+## 2026-10-18 audit rerun
+
+- Source `swift test`: **142 passed / 18 suites**, 0 failures/skips.
+- Xcode `ForkyCoreTests` target: **142 passed / 18 suites**, 0 failures/skips,
+  bundle `.artifacts/Forky-audit-core-xcode-final-20261018-192708.xcresult`.
+- Native `swift build` and `xcodebuild ... build`: succeeded.
+- Full native UI suite: **34 passed, 0 failed, 0 skipped**, **550 s**.
+  Bundle: `.artifacts/Forky-audit-ui-full-20261018-191133.xcresult`.
+- Two later app-only refinements (transactional custom-command persistence and
+  auth-diagnostics helper PATH) were rebuilt and followed by a
+  `testOpenDiffStageAndCommit` smoke run: **1 passed**, 0 failed,
+  `.artifacts/Forky-audit-ui-smoke-20261018-192624.xcresult`.
+- Audit changes removed a string `submoduleStatus()` API that only a test called, an
+  unreachable `LFSTask.locks` arm, an unreferenced theme color, an always-nil remote-name
+  parameter, and an unreachable statistics load branch. A duplicate unborn-repository test
+  was merged into the stronger multi-file test; its unique assertions were retained.
+- Genuine fixes: empty submodule directories no longer report the parent HEAD; a conflict
+  Base choice without a base section stays unresolved; draft archives budget JSON-encoded
+  bytes; command archives reject over-budget upserts; tab persistence merges into the
+  stored archive; query-string credentials are redacted; CRLF LFS pointers parse; image
+  previews use the same 64 MiB budget as local LFS objects.
+- Limits: the multi-tab persistence merge is code-reviewed but not covered by an automated
+  UI test because `--ui-testing` deliberately disables persistence. Ambient
+  `GIT_SSH_COMMAND` reporting is not exercised by a fixture. No notarization or older-OS
+  run was claimed.
+
+The historical 2026-10-17 gate below remains the record for that commit.
+
 Executed **2026-10-17**, Apple Silicon / macOS **27.0.1**, Xcode **27.0 (27A266a)**,
 Swift **6.4**, Apple Git **2.54.0**. Deployment target macOS 14 is not older-runtime proof.
 Base: human commit `ef7656dbed07f6af98cdcb70472ffdda2074b33b`. No agent commit.
 
-## Final executed gate
+## Final executed gate (2026-10-17)
 
 - Source `swift test`: **116 passed / 13 suites**, final source run **21.577 s**.
 - Native `./scripts/build.sh`: succeeded; full test gate also rebuilt final app/test source.

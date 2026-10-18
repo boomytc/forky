@@ -57,6 +57,7 @@ extension GitRepository {
             let signing = try await effectiveConfiguration("commit.gpgsign").map(Self.boolean) ?? false
             let sshCommand = try await effectiveConfiguration("core.sshCommand")
             let environment = ProcessInfo.processInfo.environment
+            let ambientSSHCommand = environment["GIT_SSH_COMMAND"] ?? ""
             let agent = environment["SSH_AUTH_SOCK"].flatMap { path -> String? in
                 guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path) else { return nil }
                 return path
@@ -71,15 +72,19 @@ extension GitRepository {
             if signingKey != nil && gpg == nil {
                 notes.append("A signing key is configured but no gpg executable was found; commits may fail.")
             }
-            if sshCommand != nil || !(environment["GIT_SSH_COMMAND"] ?? "").isEmpty {
+            if sshCommand != nil {
                 notes.append("An SSH command override is active; inspect it yourself before fetching or pushing.")
+            }
+            if !ambientSSHCommand.isEmpty {
+                // GitProcessRunner strips ambient GIT_* variables, so this cannot affect Forky's Git.
+                notes.append("Ambient GIT_SSH_COMMAND is ignored by Forky's isolated Git environment; configure core.sshCommand instead.")
             }
             if remotes.contains(where: \.embedsCredentials) {
                 notes.append("At least one remote URL embeds credentials. They stay in local Git config and are not shown here.")
             }
             notes.append("Forky does not store accounts, keys or passphrases; credential helpers and the SSH agent remain in charge.")
             return AuthenticationDiagnostics(sshAgentAvailable: agent != nil,
-                                             sshCommandConfigured: sshCommand != nil || !(environment["GIT_SSH_COMMAND"] ?? "").isEmpty,
+                                             sshCommandConfigured: sshCommand != nil,
                                              publicKeyFiles: publicKeys, gpgExecutable: gpg,
                                              signingKey: signingKey, commitSigningEnabled: signing,
                                              remotes: remotes, notes: notes)
@@ -90,9 +95,18 @@ extension GitRepository {
         guard !raw.contains("://"), !raw.hasPrefix("/") else {
             if raw.hasPrefix("/") { return ("local path", "file", false) }
             guard var components = URLComponents(string: raw) else { return ("(unparseable URL)", "unknown", false) }
-            let embedded = components.user != nil || components.password != nil
+            var embedded = components.user != nil || components.password != nil
             components.user = nil
             components.password = nil
+            components.fragment = nil
+            if let items = components.queryItems {
+                var redacted = items
+                for index in redacted.indices where Self.sensitiveQueryNames.contains(redacted[index].name.lowercased()) {
+                    if redacted[index].value != nil { embedded = true }
+                    redacted[index].value = "redacted"
+                }
+                components.queryItems = redacted
+            }
             let display = components.string ?? "(unparseable URL)"
             return (display, components.scheme ?? "unknown", embedded)
         }
@@ -101,6 +115,12 @@ extension GitRepository {
         let host = String(raw[..<colon])
         return (host + ":" + String(raw[raw.index(after: colon)...]), "ssh", false)
     }
+
+    private static let sensitiveQueryNames: Set<String> = [
+        "token", "access_token", "private_token", "oauth_token", "id_token", "refresh_token",
+        "password", "passwd", "pwd", "secret", "client_secret", "auth", "authorization",
+        "key", "apikey", "api_key", "signature", "sig"
+    ]
 
     static func shortKey(_ key: String) -> String {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)

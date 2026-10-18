@@ -7,10 +7,11 @@ struct QueryTests {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         try await f.git(["branch", "other"]); try await f.git(["switch", "other"]); try await f.git(["switch", "main"])
         let page = try await f.repository().reflog()
-        #expect(page.entries.count >= 3)
+        #expect(page.entries.count == 3)
+        #expect(Set(page.entries.map(\.oid)).count == 1)
         #expect(Set(page.entries.map(\.id)).count == page.entries.count)
     }
-    @Test func literalSearchModesAndOptionsBelongToCursor() async throws {
+    @Test func literalSearchModesSelectDistinctMatchers() async throws {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         let repo = try await f.repository()
         var options = HistoryOptions(); options.search = .author

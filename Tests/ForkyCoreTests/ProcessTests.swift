@@ -22,7 +22,14 @@ import Testing
         let runner = GitProcessRunner(executable: URL(fileURLWithPath: "/bin/sleep"), timeout: 0.1)
         let clock = ContinuousClock()
         let start = clock.now
-        await #expect(throws: GitError.self) { try await runner.run(["10"]) }
+        do {
+            _ = try await runner.run(["10"])
+            Issue.record("A timed-out child must not return a result.")
+        } catch GitError.timedOut {
+            #expect(start.duration(to: clock.now) >= .milliseconds(90))
+        } catch {
+            Issue.record("Expected a timeout, received \(error).")
+        }
         #expect(start.duration(to: clock.now) < .seconds(4))
     }
 
@@ -36,7 +43,14 @@ import Testing
 
     @Test func launchFailureRetainsReason() async {
         let runner = GitProcessRunner(executable: URL(fileURLWithPath: "/Forky-no-such-tool"))
-        await #expect(throws: GitError.self) { try await runner.run([]) }
+        do {
+            _ = try await runner.run([])
+            Issue.record("A missing executable must fail.")
+        } catch GitError.launch(let reason) {
+            #expect(reason.contains("Forky-no-such-tool"))
+        } catch {
+            Issue.record("Expected GitError.launch, received \(error).")
+        }
     }
 
     @Test func cancelledWaiterDoesNotLeakTheRepositoryGate() async throws {

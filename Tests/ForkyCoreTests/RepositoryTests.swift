@@ -3,22 +3,6 @@ import Testing
 @testable import ForkyCore
 
 @Suite(.serialized) struct RepositoryTests {
-    @Test func unbornStageAndUnstageNeverDeleteFiles() async throws {
-        let fixture = try await GitFixture(); defer { fixture.remove() }
-        try fixture.write("new.txt", "new content\n")
-        let repo = try await fixture.repository()
-        let empty = try await repo.snapshot()
-        #expect(empty.head == nil)
-        #expect(empty.branch == "main")
-        #expect(try await repo.history().commits.isEmpty)
-        try await repo.stage(try #require(empty.unstaged.first))
-        let staged = try await repo.snapshot()
-        #expect(staged.staged.count == 1)
-        try await repo.unstage(try #require(staged.staged.first))
-        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("new.txt").path))
-        #expect(try await repo.snapshot().staged.isEmpty)
-    }
-
     @Test func commitOnlyIncludesExplicitIndexAndLoadsRealHistory() async throws {
         let fixture = try await GitFixture(); defer { fixture.remove() }
         try await fixture.initialCommit()

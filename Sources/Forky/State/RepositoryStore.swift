@@ -203,9 +203,7 @@ final class RepositoryStore {
                 try Task.checkCancellation()
                 guard sessionID == session else { return }
                 if let previous = self.repository {
-                    if commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { drafts[previous.root.path] = nil }
-                    else { drafts[previous.root.path] = commitMessage }
-                    persistDrafts()
+                    self.storeDraft(commitMessage, for: previous.root.path)
                 }
                 self.repository = repository
                 self.snapshot = snapshot
@@ -214,6 +212,7 @@ final class RepositoryStore {
                 section = .changes; historyBack = []
                 commits = []; commitFiles = []; selectedCommitID = nil; selectedCommitFileID = nil
                 selectedChange = nil; diff = .empty; diffError = nil; historyError = nil
+                drafts = loadStoredDrafts()
                 commitMessage = drafts[repository.root.path] ?? ""
                 commitCompositionLoaded = false
                 commitTemplateText = nil; commitTemplateLabel = nil; commitCompositionNote = nil
@@ -582,28 +581,56 @@ final class RepositoryStore {
         draftPersistTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled, let self else { return }
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self.drafts[path] = nil }
-            else { self.drafts[path] = text }
-            self.persistDrafts()
+            self.storeDraft(text, for: path)
         }
     }
-    private func persistDrafts() {
-        guard !testing, let data = CommitDraftArchive.encode(drafts) else { return }
+
+    private func storeDraft(_ text: String, for path: String) {
+        let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        drafts[path] = blank ? nil : text
+        persistDraft(path: path, text: blank ? nil : text)
+    }
+
+    /// Each tab owns one repository draft key. Re-read the shared archive before writing
+    /// so a stale tab cannot erase drafts saved by another tab.
+    private func loadStoredDrafts() -> [String: String] {
+        guard !testing, let data = UserDefaults.standard.data(forKey: "forky.commitDrafts") else { return drafts }
+        return CommitDraftArchive.decode(data)
+    }
+
+    private func persistDraft(path: String, text: String?) {
+        guard !testing else { return }
+        var stored = loadStoredDrafts()
+        stored[path] = text
+        guard let data = CommitDraftArchive.encode(stored) else { return }
         UserDefaults.standard.set(data, forKey: "forky.commitDrafts")
     }
 
     /// The sign-off choice is Forky's own repository-scoped default; Git has no commit
     /// sign-off configuration key (`format.signoff` only affects `format-patch`).
     func saveCustomCommand(_ command: CustomCommand) throws {
-        customCommands = try CustomCommandArchive.upserting(customCommands, command: command)
-        persistCustomCommands()
+        // The command library is shared by every tab. Merge into the persisted archive
+        // instead of writing this tab's stale snapshot over newer commands.
+        let updated = try CustomCommandArchive.upserting(loadStoredCustomCommands(), command: command)
+        try persistCustomCommands(updated)
+        customCommands = updated
     }
     func deleteCustomCommand(id: UUID) {
-        customCommands = CustomCommandArchive.removing(customCommands, id: id)
-        persistCustomCommands()
+        let updated = CustomCommandArchive.removing(loadStoredCustomCommands(), id: id)
+        do {
+            try persistCustomCommands(updated)
+            customCommands = updated
+        } catch { show(error, title: "Could not save command library") }
     }
-    private func persistCustomCommands() {
-        guard !testing, let data = try? CustomCommandArchive.encode(customCommands) else { return }
+    func persistedCustomCommands() -> [CustomCommand] { loadStoredCustomCommands() }
+    private func loadStoredCustomCommands() -> [CustomCommand] {
+        guard !testing, let data = UserDefaults.standard.data(forKey: "forky.customCommands"),
+              let saved = try? CustomCommandArchive.decode(data) else { return customCommands }
+        return saved
+    }
+    private func persistCustomCommands(_ commands: [CustomCommand]) throws {
+        guard !testing else { return }
+        let data = try CustomCommandArchive.encode(commands)
         UserDefaults.standard.set(data, forKey: "forky.customCommands")
     }
 
@@ -717,9 +744,9 @@ final class RepositoryStore {
     var selectedStash: GitStash? { tools?.stashes.first { $0.id == selectedStashID } }
     var canCancelOperation: Bool { operationPhase == .running && !cancellationRequested }
 
-    func requestRemote(_ action: RemoteAction, name: String? = nil) {
+    func requestRemote(_ action: RemoteAction) {
         guard canUseTools, let snapshot else { return }
-        sheet = .remote(RemoteRequest(action: action, expected: snapshot, initialRemote: name))
+        sheet = .remote(RemoteRequest(action: action, expected: snapshot))
     }
 
     func performRemote(_ request: RemoteRequest, remote: GitRemote?, destination: String,
@@ -734,7 +761,7 @@ final class RepositoryStore {
             case .fetch: try await repo.fetch(remote, expected: request.expected)
             case .pull: try await repo.pullFastForward(remote, expected: request.expected)
             case .push: try await repo.push(remote, branch: destination, setUpstream: setUpstream, expected: request.expected)
-            case .add: break
+            case .add: break // handled by the early return above
             }
         }
     }

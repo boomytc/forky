@@ -115,19 +115,17 @@ struct QuerySheet: View {
         busy = true; failure = nil; pageWentStale = false
         reflogCursor = nil; fileCursor = nil
         do {
-            switch request.tool {
-            case .statistics: busy = false; return
-            case .overview:
+            if request.tool == .overview {
                 let value = try await request.repository.overview()
                 try Task.checkCancellation(); text = value
-            case .reflog:
+            } else if request.tool == .reflog {
                 let page = try await request.repository.reflog()
                 try Task.checkCancellation(); reflog = page.entries; reflogCursor = page.nextCursor
-            case .fileHistory:
+            } else if request.tool == .fileHistory {
                 guard let oid = request.oid, !path.isEmpty else { busy = false; return }
                 let page = try await request.repository.fileHistory(at: oid, path: GitPath(path))
                 try Task.checkCancellation(); revisions = page.entries; fileCursor = page.nextCursor
-            case .compare:
+            } else if request.tool == .compare {
                 guard !from.isEmpty, worktree || !to.isEmpty else { busy = false; return }
                 let comparison = try await request.repository.compare(from: from, to: worktree ? nil : to)
                 try Task.checkCancellation()

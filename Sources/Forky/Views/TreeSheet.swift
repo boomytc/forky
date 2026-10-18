@@ -92,7 +92,7 @@ struct TreeSheet: View {
                                         Text(line.author + " · " + line.date.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                     }.frame(width: 125, alignment: .leading)
                                     Text(line.text).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                                }.help(line.oid + "\n" + line.author + " " + line.authorMail + "\n" + line.date.formatted() + "\n" + line.summary + "\nSource filename (Git): " + line.sourceFilename)
+                                }.help(line.oid + "\n" + line.author + " " + line.authorMail + "\n" + line.date.formatted() + "\n" + line.summary + "\nSource filename (Git): " + line.sourceFilename + "\nOriginal line: \(line.originalLine)")
                             }.listStyle(.inset).accessibilityIdentifier("blameLines")
                         } else if !blame, let preview {
                             switch preview {

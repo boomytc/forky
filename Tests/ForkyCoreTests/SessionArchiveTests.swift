@@ -50,6 +50,27 @@ struct SessionArchiveTests {
         #expect(throws: (any Error).self) { try WorkspaceArchive.decode(Data(repeating: 0x20, count: WorkspaceArchive.maxBytes + 1)) }
     }
 
+    @Test func draftArchiveBudgetsEncodedBytesSoDecodeCanReadItBack() throws {
+        // Each draft is within the per-entry raw limit, but JSON escaping doubles its size.
+        // A raw-text-only budget could write an archive that decode rejects on the next launch.
+        let escaped = String(repeating: "\"\\\n", count: 20_000)
+        let drafts = Dictionary(uniqueKeysWithValues: (0..<9).map { ("/tmp/\($0)", escaped) })
+        let data = try #require(CommitDraftArchive.encode(drafts))
+        #expect(data.count <= CommitDraftArchive.maxBytes)
+        let decoded = CommitDraftArchive.decode(data)
+        #expect(decoded.count == 4)
+        #expect(decoded.values.allSatisfy { $0 == escaped })
+        let reencoded = try #require(CommitDraftArchive.encode(decoded))
+        #expect(CommitDraftArchive.decode(reencoded) == decoded)
+    }
+
+    @Test func workspaceDecodeDropsUnusableStoredPaths() throws {
+        let workspace = SavedWorkspace(name: "Stored", paths: ["relative", "/tmp/a", "/tmp/a", "/tmp/../b"])
+        let data = try WorkspaceArchive.encode([workspace])
+        let decoded = try WorkspaceArchive.decode(data)
+        #expect(decoded.first?.paths == ["/tmp/a", "/b"])
+    }
+
     @Test func draftArchiveBoundsEntriesBytesAndEmptyText() throws {
         let drafts = ["/tmp/a": "hello", "/tmp/b": "", "/tmp/c": String(repeating: "x", count: CommitDraftArchive.maxDraftBytes + 1)]
         let bounded = CommitDraftArchive.bounded(drafts)

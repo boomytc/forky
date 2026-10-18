@@ -45,6 +45,36 @@ struct CustomCommandTests {
         #expect(throws: CustomCommandError.self) { try CustomCommandArchive.encode(many) }
     }
 
+    @Test func archiveRejectsCommandsThatWouldExceedItsEncodedBudget() throws {
+        let payload = String(repeating: "x", count: 60_000)
+        var list: [CustomCommand] = []
+        var rejected = false
+        for index in 0..<CustomCommandArchive.maxCommands {
+            let command = try CustomCommandArchive.make(name: "C\(index)", scope: .repository,
+                                                        executable: "/bin/echo", arguments: [], input: payload)
+            do { list = try CustomCommandArchive.upserting(list, command: command) }
+            catch CustomCommandError.tooLarge { rejected = true; break }
+        }
+        #expect(rejected)
+        #expect(try CustomCommandArchive.encode(list).count <= CustomCommandArchive.maxBytes)
+    }
+
+    @Test func decodeRejectsStoredCommandsWithInvalidPayloads() throws {
+        // A hand-edited or older archive must not smuggle a relative executable or NUL argument
+        // into the trusted-tool boundary just because its JSON shape is valid.
+        let invalid = CustomCommand(name: "Legacy", scope: .repository, executable: "bin/echo", arguments: [], input: "")
+        #expect(throws: CustomCommandError.self) {
+            try CustomCommandArchive.decode(JSONEncoder().encode([invalid]))
+        }
+        let duplicateNames = [
+            CustomCommand(name: "Same", scope: .repository, executable: "/bin/echo", arguments: [], input: ""),
+            CustomCommand(name: " same ", scope: .repository, executable: "/bin/echo", arguments: [], input: "")
+        ]
+        #expect(throws: CustomCommandError.self) {
+            try CustomCommandArchive.decode(JSONEncoder().encode(duplicateNames))
+        }
+    }
+
     @Test func substitutionIsLiteralSinglePassAndRefusesMissingSelection() throws {
         let context = CustomCommandContext(path: "src/a.swift", repository: "/repo", revision: "abc123")
         #expect(try CustomCommandSubstitution.resolve("{path} in {repository} at {revision}", context: context)

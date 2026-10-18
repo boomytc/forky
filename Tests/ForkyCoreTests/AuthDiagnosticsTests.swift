@@ -7,6 +7,7 @@ struct AuthDiagnosticsTests {
         let f = try await GitFixture(); defer { f.remove() }; try await f.initialCommit()
         try await f.git(["remote", "add", "origin", "https://user:secret@example.invalid/team/repo.git"])
         try await f.git(["remote", "add", "peer", "git@example.invalid:team/repo.git"])
+        try await f.git(["remote", "add", "query", "https://example.invalid/team/repo.git?private_token=secret&ref=main"])
         try await f.git(["config", "user.signingkey", "ABCDEF0123456789ABCDEF0123456789ABCDEF01"])
         try await f.git(["config", "commit.gpgsign", "true"])
         let home = f.directory.appendingPathComponent("home")
@@ -31,6 +32,9 @@ struct AuthDiagnosticsTests {
         #expect(!origin.displayURL.contains("secret") && !origin.displayURL.contains("user:"))
         let peer = try #require(diagnostics.remotes.first { $0.name == "peer" })
         #expect(peer.scheme == "ssh" && !peer.embedsCredentials)
+        let query = try #require(diagnostics.remotes.first { $0.name == "query" })
+        #expect(query.embedsCredentials && query.displayURL.contains("ref=main"))
+        #expect(!query.displayURL.contains("secret"))
         #expect(diagnostics.lines.joined(separator: "\n").contains("secret") == false)
     }
 

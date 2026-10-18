@@ -107,7 +107,7 @@ swift test
 ./scripts/test.sh -only-testing:ForkyUITests/ForkyUITests/testNormalAmendMessageOnly
 ```
 
-Latest full gate: **147 passed = 116 Core + 31 native UI, 0 failed, 0 skipped**.
+Latest full gate: **176 passed = 142 Core + 34 native UI, 0 failed, 0 skipped** (2026-10-18 audit rerun).
 Fixtures are newly created and isolated; never Fork.app, business repositories, actual
 remote accounts or global Git config. Results/screenshots remain ignored .artifacts files.
 

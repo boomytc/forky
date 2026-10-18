@@ -15,12 +15,12 @@ extension GitRepository {
                 let fields = try GitParsers.string(Data(record[..<tab])).split(separator: " ")
                 guard fields.count == 3, ["100644", "100755"].contains(String(fields[0])), fields[1] == "blob",
                       GitParsers.isOID(String(fields[2])) else { throw GitError.invalidInput("Image preview needs a regular blob, not a symlink/tree/submodule.") }
-                return try await command(["cat-file", "blob", String(fields[2])]).stdout
+                return try await command(["cat-file", "blob", String(fields[2])], outputLimit: Self.lfsObjectReadLimit).stdout
             }
             let before = try await blob(from)
             let after: Data?
             if let to { after = try await blob(to) }
-            else { after = try SafeWorktree.read(root: root, path: path, limit: runner.outputLimit) }
+            else { after = try SafeWorktree.read(root: root, path: path, limit: Self.lfsObjectReadLimit) }
             return ImageComparison(before: before, after: after)
         }
     }

@@ -5,11 +5,11 @@ Independent implementation against the REA Fork 2.70.2 inventory; baseline
 not a parity percentage or proof of Fork runtime behavior. Core APIs are real and native
 UI entries route to them. Optional integrations are explicitly bring-your-own (BYO).
 
-**Executed gate:** 116 Core / 13 suites + 31 actual Mac UI = **147 passed**,
-0 failures/skips, `.artifacts/Forky-20261017-102649.xcresult`.
-A later image caption/accessibility/fixture refinement passed its stronger native rerun
-(1 test, .artifacts/Forky-20261017-105427.xcresult); it is not included in the older full
-bundle. [Detailed evidence and limits](VALIDATION.md), [usage](WORKFLOWS.md).
+**Executed gate:** 142 Core / 18 suites + 34 actual Mac UI = **176 passed**,
+0 failures/skips, 2026-10-18 audit rerun. Core passed through both `swift test` and the
+Xcode `ForkyCoreTests` target; the UI bundle is
+`.artifacts/Forky-audit-ui-full-20261018-191133.xcresult`.
+[Detailed evidence and limits](VALIDATION.md), [usage](WORKFLOWS.md).
 
 | ID | Implementation / entry | Evidence and remaining boundary |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ bundle. [Detailed evidence and limits](VALIDATION.md), [usage](WORKFLOWS.md).
 | G13 | CollaborationManagement; Selected Stash Files / existing stash views | selected literal NUL paths, rename, successful apply→checked drop/pop, untracked/index options. Real tests + native selected save. Conflicts/stale state retain entries; Fork snapshot backend unknown, no invented equivalent. |
 | G14 | CollaborationManagement; Worktrees | list/create/open/remove, directory identity and occupied/locked/dirty/ignored checks. Real linked-worktree create/remove test. No forced deletion/prune/automatic unlock. |
 | G15 | WorkspaceHub / WorkspaceTabs / SessionArchive | independent stores, tasks, drafts/history, tabs/recents/reopen/saved groups. Workspace rename with name validation, move up/down, replace-with-open-tabs, bounded JSON persistence and last-session restore (≤4 tabs); commit drafts persist with per-entry/total caps. Native workspace save/rename/reorder journey and archive bounds tests. 16 open / 8 closed sessions. |
-| G16 | RepositoryTools / Git Settings | local/inherited allowlisted settings + protected config backup, chosen Git/helper PATH; existing identity/template/signing/helpers. Read-only authentication diagnostics: SSH agent socket, SSH command override, public-key filenames only, GPG lookup on PATH, masked signing key and credential-redacted remote URLs. Backup/inheritance/redaction tests; no account/token/key storage, key generation or gpg/ssh execution, and every auth/signing combination remains unverified. |
+| G16 | RepositoryTools / Git Settings | local/inherited allowlisted settings + protected config backup, chosen Git/helper PATH; existing identity/template/signing/helpers. Read-only authentication diagnostics: SSH agent socket, SSH command override, public-key filenames only, GPG lookup on the selected Git helper PATH, masked signing key and credential-redacted remote URLs (including sensitive query parameters). Backup/inheritance/redaction tests; no account/token/key storage, key generation or gpg/ssh execution, and every auth/signing combination remains unverified. |
 | G17 | CollaborationManagement + IntegrationSheet | selected-remotes fetch, explicit immutable branch/tag push, separately reviewed upstream merge/rebase. Real local-bare remote transport + accepted-tag/rejected-branch partial-result test. All push destinations shown; no force/mirror; live authentication unverified. |
 | G18 | RepositoryTools; Patch Import / Export | frozen complete text bytes, check/index+worktree apply, safe paths and exclusive export. Real frozen-review/overwrite tests. Binary expansion/import and mail-series management excluded. |
 | G19 | SubmoduleAndLFS; Submodules | structured index gitlink rows with state, recorded/checked-out OID and ahead/behind from each submodule HEAD; add/open/verified update, literal safe paths, exact gitlink, parent+child gates, dirty/ignored refusal, 16-gitlink inspection budget. Real local submodule divergence test. No recursive/remote/force update by default; in-submodule dirtiness is not inspected. |

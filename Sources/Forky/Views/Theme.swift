@@ -4,7 +4,6 @@ enum ForkyTheme {
     static let accent = Color(nsColor: .controlAccentColor)
     static let brand = Color(red: 0.12, green: 0.60, blue: 0.43)
     static let panel = Color(nsColor: .controlBackgroundColor)
-    static let subtle = Color(nsColor: .quaternaryLabelColor)
 }
 
 struct ForkyMark: View {

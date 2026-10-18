@@ -36,6 +36,11 @@ public struct GitProcessRunner: Sendable {
         Self(executable: executable, environment: environment, timeout: timeout, outputLimit: outputLimit)
     }
 
+    /// Retains executable/environment identity when a specific read has its own bounded budget.
+    func withOutputLimit(_ limit: Int) -> Self {
+        Self(executable: executable, environment: environment, timeout: timeout, outputLimit: limit)
+    }
+
     public func run(_ arguments: [String], directory: URL? = nil) async throws -> GitProcessResult {
         try Task.checkCancellation()
         let invocation = ProcessInvocation(executable: executable, arguments: arguments,

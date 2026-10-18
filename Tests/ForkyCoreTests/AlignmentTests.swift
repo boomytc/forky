@@ -61,6 +61,10 @@ import Testing
         let fixture = try await GitFixture(); defer { fixture.remove() }
         for name in ["one.txt", "two.txt", "leave.txt"] { try fixture.write(name, name) }
         let repository = try await fixture.repository()
+        let empty = try await repository.snapshot()
+        #expect(empty.head == nil)
+        #expect(empty.branch == "main")
+        #expect(try await repository.history().commits.isEmpty)
         let chosen = try await repository.snapshot().unstaged.filter { $0.path.value != "leave.txt" }
         try await repository.stage(chosen)
         let staged = try await repository.snapshot()
@@ -142,10 +146,11 @@ import Testing
         let repository = try await fixture.repository()
         let snapshot = try await repository.snapshot()
         #expect(snapshot.tags.count == 1)
+        let tag = try #require(snapshot.tags.first)
         let tagged = try await repository.history(ref: "refs/tags/v1")
         #expect(tagged.commits.count == 2)
-        #expect(snapshot.tags[0].objectOID != snapshot.tags[0].commitOID)
-        #expect(tagged.commits[0].oid == snapshot.tags[0].commitOID)
+        #expect(tag.objectOID != tag.commitOID)
+        #expect(try #require(tagged.commits.first).oid == tag.commitOID)
         #expect(try await repository.history(query: ".*").commits.count == 1)
         #expect(try await repository.history(query: "needle").commits.count == 1)
         #expect(try await repository.history(query: "searchable body").commits.count == 1)

@@ -159,15 +159,18 @@ struct ConflictSheet: View {
     }
     private func chunkRow(_ chunk: ConflictChunk) -> some View {
         let choice = choices[chunk.id] ?? .unresolved
+        let resolved = choice != .unresolved && !(choice == .base && chunk.base == nil)
         let current = activeChunk == chunk.id
         return HStack(spacing: 6) {
-            Image(systemName: choice == .unresolved ? "circle" : "checkmark.circle.fill")
-                .foregroundStyle(choice == .unresolved ? Color.secondary : Color.green)
+            Image(systemName: resolved ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(resolved ? Color.green : Color.secondary)
             Text("Chunk \(chunk.id + 1)").font(.caption).fontWeight(current ? .semibold : .regular)
             if current { Text("current").font(.caption2).foregroundStyle(.secondary) }
             Spacer()
             Picker("Choice", selection: Binding(get: { choice }, set: { choices[chunk.id] = $0; activeChunk = chunk.id })) {
-                ForEach(ConflictChoice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(ConflictChoice.allCases.filter { $0 != .base || chunk.base != nil }, id: \.self) {
+                    Text($0.rawValue).tag($0)
+                }
             }.labelsHidden().frame(maxWidth: 150)
         }
         .padding(.horizontal, 4).padding(.vertical, 2)

@@ -220,14 +220,15 @@ public struct GitRepository: Sendable {
         }
     }
 
-    func command(_ arguments: [String], accepted: Set<Int32> = [0], write: Bool = false, network: Bool = false, literalPaths: Bool = false, timeout: TimeInterval? = nil, sequenceEditor: URL? = nil) async throws -> GitProcessResult {
+    func command(_ arguments: [String], accepted: Set<Int32> = [0], write: Bool = false, network: Bool = false, literalPaths: Bool = false, timeout: TimeInterval? = nil, sequenceEditor: URL? = nil, outputLimit: Int? = nil) async throws -> GitProcessResult {
         var args = ["--no-pager", "-c", "color.ui=false", "-c", "core.quotepath=false",
                     "-c", "core.fsmonitor=false", "-C", root.path]
         // Only caller-owned file arguments are literal. Exporting this mode globally
         // breaks stash's internal :/ (top) cleanup pathspec and can leave saved files behind.
         if literalPaths { args.insert("--literal-pathspecs", at: 0) }
         if !write { args.insert("--no-optional-locks", at: 0) }
-        let execution = timeout.map { runner.withTimeout($0) } ?? (network ? runner.withTimeout(300) : runner)
+        var execution = timeout.map { runner.withTimeout($0) } ?? (network ? runner.withTimeout(300) : runner)
+        if let outputLimit { execution = execution.withOutputLimit(outputLimit) }
         let output: GitProcessResult
         if let sequenceEditor { output = try await execution.runWithSequenceEditor(args + arguments, source: sequenceEditor) }
         else { output = try await execution.run(args + arguments) }

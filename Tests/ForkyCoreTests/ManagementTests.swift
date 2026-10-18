@@ -82,7 +82,10 @@ struct ManagementTests {
         try await f.git(["add", "secret"]); try await f.git(["commit", "-m", "Topic"])
         let oid = try #require(try await repo.snapshot().head); try await f.git(["switch", "main"])
         try f.write(".git/info/exclude", "secret\n"); try f.write("secret", "local\n")
-        await #expect(throws: GitError.self) { try await repo.merge(oid, mode: .fastForward, expected: repo.snapshot()) }
+        let before = try await repo.snapshot()
+        await #expect(throws: GitError.self) { try await repo.merge(oid, mode: .fastForward, expected: before) }
+        let after = try await repo.snapshot()
+        #expect(after.head == before.head && !after.operationInProgress)
         #expect(try String(contentsOf: f.root.appendingPathComponent("secret"), encoding: .utf8) == "local\n")
     }
     @Test func sessionsShareCommonDirectoryGate() async throws {

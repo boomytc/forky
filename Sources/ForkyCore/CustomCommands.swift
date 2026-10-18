@@ -71,6 +71,15 @@ public enum CustomCommandArchive {
                             arguments: [String], input: String,
                             existing: [CustomCommand] = [], updating id: UUID? = nil) throws -> CustomCommand {
         let name = try validatedName(name)
+        try validatePayload(executable: executable, arguments: arguments, input: input)
+        guard existing.allSatisfy({ $0.id == id || $0.name.caseInsensitiveCompare(name) != .orderedSame }) else {
+            throw CustomCommandError.duplicateName
+        }
+        return CustomCommand(id: id ?? UUID(), name: name, scope: scope,
+                             executable: executable, arguments: arguments, input: input)
+    }
+
+    static func validatePayload(executable: String, arguments: [String], input: String) throws {
         guard executable.hasPrefix("/"), !executable.utf8.contains(0), executable.utf8.count <= 65536 else {
             throw CustomCommandError.invalidExecutable
         }
@@ -79,20 +88,17 @@ public enum CustomCommandArchive {
               input.utf8.count <= maxInputBytes, !input.utf8.contains(0) else {
             throw CustomCommandError.invalidArguments
         }
-        guard existing.allSatisfy({ $0.id == id || $0.name.caseInsensitiveCompare(name) != .orderedSame }) else {
-            throw CustomCommandError.duplicateName
-        }
-        return CustomCommand(id: id ?? UUID(), name: name, scope: scope,
-                             executable: executable, arguments: arguments, input: input)
     }
 
     public static func upserting(_ commands: [CustomCommand], command: CustomCommand) throws -> [CustomCommand] {
+        try validatePayload(executable: command.executable, arguments: command.arguments, input: command.input)
         var copy = commands
         if let index = copy.firstIndex(where: { $0.id == command.id }) {
             guard copy.allSatisfy({ $0.id == command.id || $0.name.caseInsensitiveCompare(command.name) != .orderedSame }) else {
                 throw CustomCommandError.duplicateName
             }
             copy[index] = command
+            _ = try encode(copy)
             return copy
         }
         guard copy.count < maxCommands else { throw CustomCommandError.tooMany }
@@ -100,6 +106,7 @@ public enum CustomCommandArchive {
             throw CustomCommandError.duplicateName
         }
         copy.append(command)
+        _ = try encode(copy)
         return copy
     }
 
@@ -116,9 +123,18 @@ public enum CustomCommandArchive {
 
     public static func decode(_ data: Data) throws -> [CustomCommand] {
         guard data.count <= maxBytes else { throw CustomCommandError.tooLarge }
-        let commands = try JSONDecoder().decode([CustomCommand].self, from: data)
-        guard commands.count <= maxCommands, Set(commands.map(\.id)).count == commands.count,
-              commands.allSatisfy({ (try? validatedName($0.name)) != nil }) else {
+        var commands = try JSONDecoder().decode([CustomCommand].self, from: data)
+        guard commands.count <= maxCommands, Set(commands.map(\.id)).count == commands.count else {
+            throw CustomCommandError.tooLarge
+        }
+        for index in commands.indices {
+            guard let name = try? validatedName(commands[index].name) else { throw CustomCommandError.tooLarge }
+            do { try validatePayload(executable: commands[index].executable,
+                                     arguments: commands[index].arguments, input: commands[index].input) }
+            catch { throw CustomCommandError.tooLarge }
+            commands[index].name = name
+        }
+        guard Set(commands.map { $0.name.lowercased() }).count == commands.count else {
             throw CustomCommandError.tooLarge
         }
         return commands

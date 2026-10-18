@@ -13,7 +13,7 @@ public struct PatchImport: Sendable {
     public let preview: String
 }
 public enum LFSTask: Sendable {
-    case status, locks, track(GitPath), fetch(GitRemote), pull(GitRemote), lock(GitPath), unlock(GitPath)
+    case status, track(GitPath), fetch(GitRemote), pull(GitRemote), lock(GitPath), unlock(GitPath)
 }
 extension GitRepository {
     public static let editableSettings = ["user.name", "user.email", "user.signingkey", "commit.gpgsign", "format.signoff", "commit.template", "merge.ff"]
@@ -111,9 +111,6 @@ extension GitRepository {
         try bytes.write(to: destination, options: .withoutOverwriting)
     }
 
-    public func submoduleStatus() async throws -> String {
-        try await gate.withPermit { try GitParsers.string(try await command(["submodule", "status"]).stdout) }
-    }
     public func submoduleDirectory(_ path: GitPath, expected: RepositorySnapshot) async throws -> URL {
         try await gate.withPermit {
             _ = try await checkReviewed(expected)
@@ -190,7 +187,6 @@ extension GitRepository {
             let args: [String], network: Bool, write: Bool
             switch action {
             case .status: args = ["status"]; network = false; write = false
-            case .locks: args = ["locks"]; network = true; write = false
             case .track(let path): args = ["track", "--filename", "--", path.value]; network = false; write = true
             case .fetch(let remote):
                 _ = try checkedRemote(remote, expected: expected, fresh: fresh)

@@ -102,7 +102,19 @@ extension GitRepository {
     /// Runs one read-only Git command inside a submodule path; missing or uninitialized
     /// directories return nil rather than failing the whole status read.
     private func childValue(_ directory: String, _ arguments: [String]) async throws -> String? {
-        guard FileManager.default.fileExists(atPath: directory) else { return nil }
+        // `git -C` discovers a repository in parent directories. Require this path to be
+        // its own worktree root, so an empty leftover directory cannot report the parent HEAD.
+        let metadata: SafeWorktree.Metadata?
+        do { metadata = try SafeWorktree.metadata(at: URL(fileURLWithPath: directory)) }
+        catch { return nil }
+        guard let metadata, metadata.isDirectory else { return nil }
+        let top = try await command(["-C", directory, "rev-parse", "--show-toplevel"], accepted: [0, 128])
+        guard top.status == 0, var topPath = try? GitParsers.string(top.stdout) else { return nil }
+        if topPath.hasSuffix("\n") { topPath.removeLast() }
+        guard topPath.hasPrefix("/") else { return nil }
+        let expected = URL(fileURLWithPath: directory, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL.path
+        let actual = URL(fileURLWithPath: topPath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL.path
+        guard actual == expected else { return nil }
         let result = try await command(["-C", directory] + arguments, accepted: [0, 128])
         guard result.status == 0 else { return nil }
         return try GitParsers.string(result.stdout).trimmingCharacters(in: .newlines)
@@ -149,10 +161,12 @@ extension GitParsers {
 
     /// A pointer is small, versioned text; anything else is treated as raw content by callers.
     public static func lfsPointer(_ data: Data) -> LFSPointer? {
-        guard data.count <= 1024, let text = String(data: data, encoding: .utf8),
-              text.hasPrefix("version https://git-lfs.github.com/spec/v1\n") else { return nil }
+        guard data.count <= 1024, let raw = String(data: data, encoding: .utf8) else { return nil }
+        // Pointers can acquire CRLF through working-tree filters; accept both line endings.
+        let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        guard text.hasPrefix("version https://git-lfs.github.com/spec/v1\n") else { return nil }
         var oid: String?, size: Int?
-        for line in text.split(separator: "\n") {
+        for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
             let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
             if parts[0] == "oid" {

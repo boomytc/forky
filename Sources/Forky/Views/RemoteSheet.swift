@@ -14,7 +14,7 @@ struct RemoteSheet: View {
     init(request: RemoteRequest, store: RepositoryStore) {
         self.request = request; self.store = store
         let metadata = request.expected.collaboration.value
-        _remoteName = State(initialValue: request.initialRemote ?? metadata?.tracking?.remote
+        _remoteName = State(initialValue: metadata?.tracking?.remote
                             ?? metadata?.remotes.first(where: { $0.name == "origin" })?.name ?? metadata?.remotes.first?.name ?? "")
         let upstream = metadata?.tracking?.mergeRef
         _destination = State(initialValue: upstream.map { String($0.dropFirst("refs/heads/".count)) } ?? request.expected.branch ?? "")

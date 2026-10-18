@@ -80,7 +80,7 @@ public struct ConflictDocument: Sendable {
     /// Counts only chunks that belong to this document; unrelated keys are ignored.
     public func progress(_ choices: [Int: ConflictChoice]) -> ConflictProgress {
         let resolved = chunks.reduce(0) { total, chunk in
-            (choices[chunk.id] ?? .unresolved) == .unresolved ? total : total + 1
+            isResolved(choices[chunk.id] ?? .unresolved, in: chunk) ? total + 1 : total
         }
         return ConflictProgress(resolved: resolved, total: chunks.count)
     }
@@ -88,15 +88,24 @@ public struct ConflictDocument: Sendable {
     /// The next unresolved chunk strictly after `id`, or the first one when `id` is nil.
     public func nextUnresolvedID(after id: Int?, choices: [Int: ConflictChoice]) -> Int? {
         chunks.first { chunk in
-            (id.map { chunk.id > $0 } ?? true) && (choices[chunk.id] ?? .unresolved) == .unresolved
+            (id.map { chunk.id > $0 } ?? true) && !isResolved(choices[chunk.id] ?? .unresolved, in: chunk)
         }?.id
     }
 
     /// The previous unresolved chunk strictly before `id`, or the last one when `id` is nil.
     public func previousUnresolvedID(before id: Int?, choices: [Int: ConflictChoice]) -> Int? {
         chunks.last { chunk in
-            (id.map { chunk.id < $0 } ?? true) && (choices[chunk.id] ?? .unresolved) == .unresolved
+            (id.map { chunk.id < $0 } ?? true) && !isResolved(choices[chunk.id] ?? .unresolved, in: chunk)
         }?.id
+    }
+
+    /// A base choice without a base section would leave the original markers in the result.
+    private func isResolved(_ choice: ConflictChoice, in chunk: ConflictChunk) -> Bool {
+        switch choice {
+        case .unresolved: false
+        case .base: chunk.base != nil
+        default: true
+        }
     }
 
     /// Bulk selection for one side; the caller still reviews the rendered result before saving.

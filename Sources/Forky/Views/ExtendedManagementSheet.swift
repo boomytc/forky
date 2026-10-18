@@ -225,6 +225,9 @@ struct ExtendedManagementSheet: View {
                             if let ahead = submodule.ahead, let behind = submodule.behind {
                                 Text("ahead \(ahead) · behind \(behind)").font(.caption2).foregroundStyle(.secondary)
                             }
+                            Text("recorded " + String(submodule.recordedOID.prefix(8))
+                                 + " · HEAD " + String((submodule.checkedOutOID ?? "—").prefix(8)))
+                                .font(.caption2).foregroundStyle(.tertiary)
                             Spacer()
                             Button("Update…") { value = submodule.path.value; action = "Update" }
                                 .accessibilityIdentifier("submoduleUpdate:\(submodule.path.value)")
@@ -253,6 +256,7 @@ struct ExtendedManagementSheet: View {
                         HStack(spacing: 8) {
                             Text(lock.path).font(.system(.caption, design: .monospaced)).lineLimit(1)
                             if let owner = lock.owner { Text(owner).font(.caption2).foregroundStyle(.secondary) }
+                            if let lockedAt = lock.lockedAt { Text(lockedAt).font(.caption2).foregroundStyle(.tertiary) }
                             Spacer()
                             Button("Unlock…") { value = lock.path; action = "Unlock" }
                                 .accessibilityIdentifier("lfsUnlock:\(lock.path)")
@@ -337,7 +341,9 @@ struct ExtendedManagementSheet: View {
                 text = list.map { $0.root.path + " · " + ($0.branch ?? "detached") }.joined(separator: "\n")
             case .settings:
                 if action == "Authentication Diagnostics" {
-                    let diagnostics = try await request.repository.authenticationDiagnostics()
+                    let helperPath = store.explicitHelperPATH.isEmpty ? nil
+                        : store.explicitHelperPATH.split(separator: ":").map(String.init)
+                    let diagnostics = try await request.repository.authenticationDiagnostics(pathDirectories: helperPath)
                     try Task.checkCancellation(); text = diagnostics.lines.joined(separator: "\n")
                 } else {
                     let list = try await request.repository.settings()
@@ -445,7 +451,6 @@ struct ExtendedManagementSheet: View {
                 }
                 let task: LFSTask
                 switch action {
-                case "Locks": task = .locks
                 case "Track": task = .track(try GitPath(value))
                 case "Lock": task = .lock(try GitPath(value))
                 case "Unlock": task = .unlock(try GitPath(value))
@@ -493,7 +498,7 @@ struct ExtendedManagementSheet: View {
             let args = try JSONDecoder().decode([String].self, from: Data(argv.utf8))
             let command = try CustomCommandArchive.make(name: saveName, scope: saveScope, executable: value,
                                                         arguments: args, input: input,
-                                                        existing: store.customCommands, updating: UUID(uuidString: commandID))
+                                                        existing: store.persistedCustomCommands(), updating: UUID(uuidString: commandID))
             try store.saveCustomCommand(command)
             commandID = command.id.uuidString
             saveName = command.name

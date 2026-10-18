@@ -77,8 +77,9 @@ public enum WorkspaceArchive {
         var seen = Set<String>(), unique: [String] = []
         for path in paths {
             let url = try LocalFilePath.absolute(path)
-            guard seen.insert(url.path).inserted else { continue }
-            unique.append(url.path)
+            let normalized = url.standardizedFileURL.path
+            guard seen.insert(normalized).inserted else { continue }
+            unique.append(normalized)
             guard unique.count <= maxPathsPerWorkspace else {
                 throw GitError.invalidInput("A workspace holds at most \(maxPathsPerWorkspace) repositories.")
             }
@@ -96,11 +97,18 @@ public enum WorkspaceArchive {
     public static func decode(_ data: Data) throws -> [SavedWorkspace] {
         guard data.count <= maxBytes else { throw SessionArchiveError.tooLarge }
         let workspaces = try JSONDecoder().decode([SavedWorkspace].self, from: data)
-        guard workspaces.count <= maxWorkspaces,
-              workspaces.allSatisfy({ (try? validatedName($0.name)) != nil && $0.paths.count <= maxPathsPerWorkspace }) else {
-            throw SessionArchiveError.tooLarge
+        guard workspaces.count <= maxWorkspaces else { throw SessionArchiveError.tooLarge }
+        return try workspaces.map { workspace in
+            guard (try? validatedName(workspace.name)) != nil else { throw SessionArchiveError.tooLarge }
+            var seen = Set<String>(), paths: [String] = []
+            for raw in workspace.paths {
+                guard paths.count < maxPathsPerWorkspace else { break }
+                guard let url = try? LocalFilePath.absolute(raw) else { continue }
+                let normalized = url.standardizedFileURL.path
+                if seen.insert(normalized).inserted { paths.append(normalized) }
+            }
+            return SavedWorkspace(id: workspace.id, name: workspace.name, paths: paths)
         }
-        return workspaces
     }
 }
 
@@ -112,18 +120,24 @@ public enum CommitDraftArchive {
 
     public static func bounded(_ drafts: [String: String]) -> [String: String] {
         var result: [String: String] = [:]
-        var budget = maxBytes
-        for (path, text) in drafts.sorted(by: { $0.key < $1.key }).prefix(maxEntries) {
-            guard !text.isEmpty, text.utf8.count <= maxDraftBytes, text.utf8.count <= budget,
+        // Budget the JSON-encoded archive, which can be larger than the raw text due to escaping.
+        // Decoding applies the same `maxBytes` limit, so a raw-text-only budget could persist an
+        // archive that is silently discarded on the next launch.
+        for (path, text) in drafts.sorted(by: { $0.key < $1.key }) {
+            guard result.count < maxEntries, !text.isEmpty, text.utf8.count <= maxDraftBytes,
                   !path.utf8.contains(0) else { continue }
             result[path] = text
-            budget -= text.utf8.count
+            guard let data = try? JSONEncoder().encode(result), data.count <= maxBytes else {
+                result[path] = nil
+                continue
+            }
         }
         return result
     }
 
     public static func encode(_ drafts: [String: String]) -> Data? {
-        try? JSONEncoder().encode(bounded(drafts))
+        guard let data = try? JSONEncoder().encode(bounded(drafts)), data.count <= maxBytes else { return nil }
+        return data
     }
 
     public static func decode(_ data: Data) -> [String: String] {
